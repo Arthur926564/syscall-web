@@ -1,29 +1,30 @@
-#include "os/fs.h"
-#include "os/signals.h"
-#include "os/time.h"
-#include <fcntl.h>
+#include "net/tcp.h"
 #include <stdio.h>
+#include <unistd.h>
+#include <string.h>
 
-int main() {
-	os_setup_signals();
+int main(void) {
+	printf("yes or no \n");
+    int server_fd = tcp_listen(8080);
+    if (server_fd < 0)
+        return 1;
 
-    int fd = os_open("www/index.html", O_RDONLY);
-    if (fd < 0) return 1;
+    printf("Listening on port 8080...\n");
 
-    char buf[128];
-    ssize_t n = os_read(fd, buf, sizeof(buf)-1);
-    if (n > 0) {
-        buf[n] = '\0';
-        printf("Read %zd bytes:\n%s\n", n, buf);
+    while (1) {
+        int client_fd = tcp_accept(server_fd);
+        if (client_fd < 0)
+            continue;
+		// This is something chatgpt gave me but I am kind of lost with all of this at this point...
+		const char *response =
+    		"HTTP/1.1 200 OK\r\n"
+    		"Content-Length: 20\r\n"
+    		"Content-Type: text/plain\r\n"
+    		"Connection: close\r\n"
+    		"\r\n"
+    		"Hello from C server\n";
+		write(client_fd, response, strlen(response));
+        close(client_fd);
     }
-    os_close(fd);
-
-    int timer_fd = os_create_timer(1000);
-    for (int i = 0; i < 5; i++) {
-        os_wait_timer(timer_fd);
-        printf("Timer tick %d\n", i+1);
-    }
-
-    return 0;
 }
 
