@@ -1,7 +1,7 @@
 #include "core/server.h"
+#include "core/connection.h"
 #include "net/tcp.h"
 #include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 
 
@@ -23,16 +23,18 @@ void server_loop(int server_fd) {
 		if (client_fd < 0) {
 			continue;
 		}
-		// This is something chatgpt gave me but I am kind of lost with all of this at this point...
-		const char *response =
-    		"HTTP/1.1 200 OK\r\n"
-    		"Content-Length: 20\r\n"
-    		"Content-Type: text/plain\r\n"
-    		"Connection: close\r\n"
-    		"\r\n"
-    		"Hello from C server\n";
-		write(client_fd, response, strlen(response));
-        close(client_fd);
+		printf("this is another but )ASJASLKFJALKFJAKFJALKSFJASLKFJALK test here\n");
+		connection_t *conn = connection_create(client_fd);
+		int n = read(conn->fd, &conn->in, 15);
+		printf("this is another test here\n");
+
+		if (n > 0) { 
+			printf("this is a test here\n");
+			printf("this is the value of n %d\n", n);
+			// blablabla
+		}
+
+		connection_destroy(conn);
 
 	}
 }

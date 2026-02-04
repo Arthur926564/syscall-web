@@ -1,8 +1,6 @@
 #include "net/tcp.h"
 #include "core/server.h"
-#include <stdio.h>
 #include <unistd.h>
-#include <string.h>
 
 int main(void) {
 	int server_fd = server_init(8080);

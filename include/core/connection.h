@@ -1,17 +1,11 @@
 #include <stddef.h>
 #include "util/buffer.h"
 
-typedef enum {
-	CONN_READING,
-	CONNN_WRITING,
-	CONN_CLOSED
-} conn_state_t;
-
 typedef struct {
 	int fd;
 	buffer_t in;
 	buffer_t out;
-	conn_state_t state;
+	enum conn_state_t {CONN_READING, CONNN_WRITING, CONN_CLOSED} state;
 } connection_t;
 
 
