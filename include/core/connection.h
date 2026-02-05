@@ -1,3 +1,6 @@
+#ifndef CORE_CONNECTION_H
+#define CORE_CONNECTION_H
+
 #include <stddef.h>
 #include "util/buffer.h"
 
@@ -12,3 +15,5 @@ typedef struct {
 connection_t *connection_create(int fd);
 
 void connection_destroy(connection_t *connection);
+
+#endif
