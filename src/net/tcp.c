@@ -15,7 +15,11 @@ int tcp_listen(uint16_t port) {
 	}
 	int yes = 1;
 
-	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
+		perror("setsockopt");
+		close(fd);
+		return -1;
+	}
 
 	struct sockaddr_in addr = {
 		.sin_family = AF_INET,

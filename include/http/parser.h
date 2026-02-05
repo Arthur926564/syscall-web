@@ -12,4 +12,6 @@ typedef struct {
 
 int http_parse_request(buffer_t *in, http_request_t *req);
 
+int is_static_request(http_request_t *req);
+
 #endif

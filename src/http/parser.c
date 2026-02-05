@@ -1,7 +1,9 @@
 #include "http/parser.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <fnmatch.h>
 
 
 int http_parse_request(buffer_t *in, http_request_t *req) {
@@ -27,4 +29,10 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
 	}
 	return 0;
 
+}
+
+
+
+int is_static_request(http_request_t *req) {
+	return strcmp(req->metod, "GET") == 0;
 }
