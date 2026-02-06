@@ -5,43 +5,22 @@
 #include <string.h>
 
 
-
-
-
-void http_response_write_html(buffer_t *out, const char *html) {
-    char header[512];
-    int body_len = strlen(html);
-    int n = snprintf(header, sizeof(header),
-                     "HTTP/1.1 200 OK\r\n"
-                     "Content-Length: %d\r\n"
-                     "Content-Type: text/html\r\n"
-                     "Connection: close\r\n"
-                     "\r\n", body_len);
-    buffer_append(out, header, n);
-    buffer_append(out, html, body_len);
-}
-
-
-void http_response_write_ok(buffer_t *out, char *response) {
-	char header[512];
-	int body_len = strlen(response);
-	int n = snprintf(header, sizeof(header), 
-			        "HTTP/1.1 200 OK\r\n"
-                     "Content-Length: %d\r\n"
-                     "Content-Type: text/plain\r\n"
-                     "\r\n", body_len);
-
-	buffer_append(out, header, n);
-	buffer_append(out, response, strlen(response));
-}
-
+// I am not really sure about this function, maybe just write it as a classical write ok
 void http_response_write_404(buffer_t *out) {
-	const char *res404 = "HTTP/1.1 404 Not Found\r\n"
-                     "Content-Length: 9\r\n"
-                     "Content-Type: text/plain\r\n"
-                     "\r\n"
-                     "Not Found";
-	buffer_append(out, res404, strlen(res404));
+	const char *response_404 =
+    "HTTP/1.1 404 Not Found\r\n"
+    "Content-Type: text/html\r\n"
+    "Connection: close\r\n"
+    "\r\n"
+    "<!DOCTYPE html>"
+    "<html>"
+    "<head><title>404 Not Found</title></head>"
+    "<body>"
+    "<h1>404 Not Found</h1>"
+    "<p>The page you requested does not exist.</p>"
+    "</body>"
+    "</html>";
+	buffer_append(out, response_404, strlen(response_404));
 }
 
 

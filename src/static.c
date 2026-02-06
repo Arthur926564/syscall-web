@@ -16,7 +16,6 @@ void static_serve(http_request_t *req, connection_t *conn) {
 		http_response_write_404(&conn->out);
 		return;
 	}
-	printf("%s\n", filepath);
 	FILE *f = fopen(filepath, "rb");
 	if (!f) {
 		http_response_write_404(&conn->out);
