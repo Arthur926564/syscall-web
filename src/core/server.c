@@ -47,6 +47,7 @@ void server_loop(int server_fd) {
                 http_request_t req;
                 int consumed = http_parse_request(&conn->in, &req);
 
+
                 if (consumed > 0) {
                     handle_request(&req, conn);
                     buffer_consume(&conn->in, consumed);
