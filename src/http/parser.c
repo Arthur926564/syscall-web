@@ -35,7 +35,6 @@ int find_header(char *line, http_header_t *header) {
 
 
 int http_parse_request(buffer_t *in, http_request_t *req) {
-
 	char *data = in->data;
 	size_t len = in->len;
 	int i = 0;
@@ -44,7 +43,7 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
 			char saved = data[i];
 			data[i] = '\0';
 			int n = sscanf(data, "%7s %255s %15s",
-					req->metod,
+					req->method,
 					req->path,
 					req->version);
 			data[i] = saved;
@@ -61,22 +60,22 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
 	// Now we need to look for all the rest of the header
 	// while next line exists
 	while (i + 3 < len
-			&& next_line_exists(data, i, len)) {
+			&& next_line_exists(data, i, len)
+			&& req->header_count < 32) {
 		if (data[i] == '\r' && data[i + 1] == '\n') {
 			http_header_t header;
 			char current_line[512];
 			int line_len = i - start_of_line;
 			if (line_len >= sizeof(current_line)) line_len = sizeof(current_line) - 1;
-			
-			strncpy(current_line, data + start_of_line, line_len);
+			memcpy(current_line, data + start_of_line, line_len);
 			current_line[line_len] = '\0';
+
 			find_header(current_line,  &header);
-			if (req->header_count < 32) {
-				req->headers[req->header_count] = header;
-				req->header_count += 1;
-			}
-			start_of_line = i + 2;
+			req->headers[req->header_count] = header;
+			req->header_count += 1;
+
 			i += 2;
+			start_of_line = i;
 		} else {
 			i++;
 		}
@@ -87,7 +86,20 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
 
 }
 
+void http_request_reset(http_request_t *req) {
+	req->header_count = 0;
+	memset(req->method, 0, sizeof(req->method));
+	memset(req->path, 0, sizeof(req->path));
+	memset(req->version, 0, sizeof(req->version));
+	for (size_t i = 0; i < 32; i++) {
+		req->headers[i].key[0] = '\0';
+		req->headers[i].value[0] = '\0';
+	}
+}
+
 const char * get_header(http_request_t *req, const char *key) {
+	if (!req || !key) return NULL;
+	
 	for (size_t i = 0; i < req->header_count; i++) {
 		if (strcasecmp(req->headers[i].key, key) == 0) {
 			return req->headers[i].value;
@@ -97,5 +109,5 @@ const char * get_header(http_request_t *req, const char *key) {
 }
 
 int is_static_request(http_request_t *req) {
-	return strcmp(req->metod, "GET") == 0;
+	return strcmp(req->method, "GET") == 0;
 }

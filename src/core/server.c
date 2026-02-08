@@ -6,6 +6,7 @@
 #include "net/tcp.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -43,9 +44,12 @@ void server_loop(int server_fd) {
 
             buffer_append(&conn->in, tmp, (size_t)n);
 
+            http_request_t req;
+			conn->req = req;
             while (1) {
-                http_request_t req;
+				http_request_reset(&req);
                 int consumed = http_parse_request(&conn->in, &req);
+				conn->state = CONN_READING_BODY;
 
 
                 if (consumed > 0) {
@@ -60,7 +64,15 @@ void server_loop(int server_fd) {
 						}
 						buffer_consume(&conn->out, n);
 					}
-					break;
+					const char *conn_header = get_header(&req, "Connection");
+					int keep_alive = conn_header && strcmp(conn_header, "keep_alive");
+
+					http_request_reset(&req);
+
+					if (!keep_alive) {
+						conn->state = CONN_READING_HEADERS;
+						break;
+					}
                 } else if (consumed == 0) {
                     // need more data, wait for next read
                     break;
@@ -70,7 +82,6 @@ void server_loop(int server_fd) {
                 }
             }
         }
-
         connection_destroy(conn);
     }
 }
