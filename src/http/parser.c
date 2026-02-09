@@ -6,12 +6,6 @@
 #include <fnmatch.h>
 #include <string.h>
 
-int next_line_exists(char *data, size_t i, size_t len) {
-    if (i + 3 >= len) return 0;
-    return !(data[i] == '\r' && data[i+1] == '\n'
-             && data[i+2] == '\r' && data[i+3] == '\n');
-}
-
 
 int find_header(char *line, http_header_t *header) {
 	char *colon = strchr(line, ':');
@@ -32,59 +26,60 @@ int find_header(char *line, http_header_t *header) {
 	return 0;
 }
 
-
-
 int http_parse_request(buffer_t *in, http_request_t *req) {
-	char *data = in->data;
-	size_t len = in->len;
-	int i = 0;
-	while (i + 1 < len) {
-		if (data[i] == '\r' && data[i+1] == '\n') {
-			char saved = data[i];
-			data[i] = '\0';
-			int n = sscanf(data, "%7s %255s %15s",
-					req->method,
-					req->path,
-					req->version);
-			data[i] = saved;
-				
-			if (n != 3) {
-				return -1;
-			}
-			break;
-		}
-		i++;
-	}
-	int start_of_line = i;
-	
-	// Now we need to look for all the rest of the header
-	// while next line exists
-	while (i + 3 < len
-			&& next_line_exists(data, i, len)
-			&& req->header_count < 32) {
-		if (data[i] == '\r' && data[i + 1] == '\n') {
-			http_header_t header;
-			char current_line[512];
-			int line_len = i - start_of_line;
-			if (line_len >= sizeof(current_line)) line_len = sizeof(current_line) - 1;
-			memcpy(current_line, data + start_of_line, line_len);
-			current_line[line_len] = '\0';
+    char *data = in->data;
+    size_t len = in->len;
+    size_t i = 0;
 
-			find_header(current_line,  &header);
-			req->headers[req->header_count] = header;
-			req->header_count += 1;
+    // Parse request line
+    for (; i + 1 < len; i++) {
+        if (data[i] == '\r' && data[i+1] == '\n') {
+            data[i] = '\0';
+            if (sscanf(data, "%7s %255s %15s",
+                       req->method,
+                       req->path,
+                       req->version) != 3) {
+                return -1;
+            }
+            data[i] = '\r';
+            i += 2; 
+            break;
+        }
+    }
 
-			i += 2;
-			start_of_line = i;
-		} else {
-			i++;
-		}
-	}
-	
-	
-	return 1;
+    size_t consumed = i; 
+    req->header_count = 0;
 
+    // Parse headers
+    while (i + 3 < len) {
+        if (data[i] == '\r' && data[i+1] == '\n' &&
+            data[i+2] == '\r' && data[i+3] == '\n') {
+            consumed = i + 4; 
+            break;
+        }
+
+        size_t line_start = i;
+        while (i + 1 < len && !(data[i] == '\r' && data[i+1] == '\n')) i++;
+        if (i + 1 >= len) break; 
+
+        char saved = data[i];
+        data[i] = '\0';
+
+        if (req->header_count < 32) {
+            http_header_t header;
+            if (find_header(data + line_start, &header) == 0) {
+                req->headers[req->header_count++] = header;
+            }
+        }
+
+        data[i] = saved;
+        i += 2; 
+    }
+
+    return consumed;
 }
+
+
 
 void http_request_reset(http_request_t *req) {
 	req->header_count = 0;
@@ -99,9 +94,12 @@ void http_request_reset(http_request_t *req) {
 
 const char * get_header(http_request_t *req, const char *key) {
 	if (!req || !key) return NULL;
-	
+	printf("are we here or not \n");
+	printf("what is the header_count %d\n", req->header_count);
 	for (size_t i = 0; i < req->header_count; i++) {
+		printf("this is the current key: %s\n", req->headers[i].key);
 		if (strcasecmp(req->headers[i].key, key) == 0) {
+			printf("YESSSS: %s\n", req->headers[i].value);
 			return req->headers[i].value;
 		}
 	}

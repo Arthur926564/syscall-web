@@ -33,8 +33,15 @@ void http_response_write_file(buffer_t *out,
 							conn_state_t state) {
 	char header[512];
 	int header_len;
+	printf("do we even come here or not?\n");
+	if (state == CONN_WRITING) {
+		printf("wtf\n");
+	} else if (state == CONN_CLOSED) {
+		printf("wtf doble\n");
+	}
 	if (state == CONN_READING_HEADERS
 			|| state == CONN_READING_BODY) {
+
 		header_len = snprintf(
     		header,
     		sizeof(header),
