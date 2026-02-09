@@ -1,4 +1,5 @@
 #include "http/http_response.h"
+#include "core/connection.h"
 #include "util/buffer.h"
 
 #include <stdio.h>
@@ -28,21 +29,45 @@ void http_response_write_404(buffer_t *out) {
 void http_response_write_file(buffer_t *out,
 							char *data,
 							long size,
-							const char *content_type) {
+							const char *content_type,
+							conn_state_t state) {
 	char header[512];
-	int header_len = snprintf(
-    	header,
-    	sizeof(header),
-    	"HTTP/1.1 200 OK\r\n"
-    	"Content-Length: %ld\r\n"
-    	"Content-Type: %s\r\n"
-    	"Connection: close\r\n"
-    	"\r\n",
-    	size,          // first long (%ld)
-    	content_type   // second string (%s)
-	);
+	int header_len;
+	printf("do we even come here or not?\n");
+	if (state == CONN_WRITING) {
+		printf("wtf\n");
+	} else if (state == CONN_CLOSED) {
+		printf("wtf doble\n");
+	}
+	if (state == CONN_READING_HEADERS
+			|| state == CONN_READING_BODY) {
 
+		header_len = snprintf(
+    		header,
+    		sizeof(header),
+    		"HTTP/1.1 200 OK\r\n"
+    		"Content-Length: %ld\r\n"
+    		"Content-Type: %s\r\n"
+    		"Connection: keep-alive\r\n"
+    		"\r\n",
+    		size,          // first long (%ld)
+    		content_type   // second string (%s)
+		);
 
+	} else {
+		char header[512];
+		header_len = snprintf(
+    		header,
+    		sizeof(header),
+    		"HTTP/1.1 200 OK\r\n"
+    		"Content-Length: %ld\r\n"
+    		"Content-Type: %s\r\n"
+    		"Connection: close\r\n"
+    		"\r\n",
+    		size,          // first long (%ld)
+    		content_type   // second string (%s)
+		);
+	}
 
 	buffer_append(out, header, header_len);
 	buffer_append(out, data, size);

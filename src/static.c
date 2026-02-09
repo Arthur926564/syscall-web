@@ -10,6 +10,8 @@
 
 
 void static_serve(http_request_t *req, connection_t *conn) {
+
+
 	char filepath[MAX_PATH];
 
 	if (resolve_path(req->path, filepath) < 0) {
@@ -34,7 +36,7 @@ void static_serve(http_request_t *req, connection_t *conn) {
 
 	const char *content_type = get_content_type(filepath);
 
-	http_response_write_file(&conn->out, data, size, content_type);
+	http_response_write_file(&conn->out, data, size, content_type, conn->state);
 
 	free(data);
 }

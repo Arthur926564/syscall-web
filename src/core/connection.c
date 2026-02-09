@@ -7,7 +7,7 @@ connection_t *connection_create(int fd) {
 	if (!connection) return NULL;
 	
 	connection->fd = fd;
-	connection->state = CONN_CLOSED;
+	connection->state = CONN_READING_HEADERS;
 	connection->in.data = NULL;
 	connection->in.cap = 0;
 	connection->in.len = 0;
