@@ -2,6 +2,7 @@
 #define HTTP_REQUEST_H
 
 #include "util/buffer.h"
+#include <stdbool.h>
 
 
 typedef struct {
@@ -25,5 +26,7 @@ int http_parse_request(buffer_t *in, http_request_t *req);
 void http_request_reset(http_request_t *req);
 
 int is_static_request(http_request_t *req);
+
+bool keep_alive(http_request_t *req);
 
 #endif

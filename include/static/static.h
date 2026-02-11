@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include "http/parser.h"
 #include "core/connection.h"
 

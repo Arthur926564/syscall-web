@@ -2,6 +2,7 @@
 #include "core/connection.h"
 #include "util/buffer.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -30,18 +31,12 @@ void http_response_write_file(buffer_t *out,
 							char *data,
 							long size,
 							const char *content_type,
-							conn_state_t state) {
+							connection_t *conn) {
+
 	char header[512];
 	int header_len;
-	printf("do we even come here or not?\n");
-	if (state == CONN_WRITING) {
-		printf("wtf\n");
-	} else if (state == CONN_CLOSED) {
-		printf("wtf doble\n");
-	}
-	if (state == CONN_READING_HEADERS
-			|| state == CONN_READING_BODY) {
-
+	if (conn->keep_alive) {
+		printf("we are in keep alive \n");
 		header_len = snprintf(
     		header,
     		sizeof(header),
@@ -55,6 +50,7 @@ void http_response_write_file(buffer_t *out,
 		);
 
 	} else {
+		printf("we are in close connection \n");
 		char header[512];
 		header_len = snprintf(
     		header,
