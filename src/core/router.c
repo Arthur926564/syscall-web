@@ -1,4 +1,5 @@
 #include "core/router.h"
+#include <stdbool.h>
 #include "http/parser.h"
 #include "http/http_response.h"
 #include "static/static.h"

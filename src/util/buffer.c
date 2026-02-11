@@ -6,11 +6,9 @@
 
 void buffer_init(buffer_t *b) {
 	if (!b) return;
-	
 	b->data = NULL;
-	b->cap = 0;
 	b->len = 0;
-
+	b->cap = 0;
 }
 
 void buffer_free(buffer_t *b) {
@@ -22,7 +20,7 @@ void buffer_free(buffer_t *b) {
 
 void buffer_append(buffer_t *b, const void *data, size_t n) {
 	if (!b) {
-		perror("empy buffer");
+		perror("empty buffer");
 		return;
 	}
 	// In case we need to free up some space
@@ -52,6 +50,7 @@ void buffer_consume(buffer_t *b, size_t n) {
 		b->len = 0;
 		return;
 	}
+	b->len -= n;
 	memmove(b->data, b->data + n, b->len - n);
 }
 

@@ -5,6 +5,7 @@
 #include <string.h>
 #include <fnmatch.h>
 #include <string.h>
+#include <stdbool.h>
 
 
 int find_header(char *line, http_header_t *header) {
@@ -75,8 +76,7 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
         data[i] = saved;
         i += 2; 
     }
-
-    return consumed;
+    return i;
 }
 
 
@@ -94,12 +94,8 @@ void http_request_reset(http_request_t *req) {
 
 const char * get_header(http_request_t *req, const char *key) {
 	if (!req || !key) return NULL;
-	printf("are we here or not \n");
-	printf("what is the header_count %d\n", req->header_count);
 	for (size_t i = 0; i < req->header_count; i++) {
-		printf("this is the current key: %s\n", req->headers[i].key);
 		if (strcasecmp(req->headers[i].key, key) == 0) {
-			printf("YESSSS: %s\n", req->headers[i].value);
 			return req->headers[i].value;
 		}
 	}
@@ -109,3 +105,24 @@ const char * get_header(http_request_t *req, const char *key) {
 int is_static_request(http_request_t *req) {
 	return strcmp(req->method, "GET") == 0;
 }
+
+
+bool keep_alive(http_request_t *req) {
+	const char *connection_header = get_header(req, "Connection");
+	if (connection_header && strcasecmp(connection_header, "keep-alive") == 0) {
+		return true;
+	}
+	return false;
+}
+
+
+
+
+
+
+
+
+
+
+
+

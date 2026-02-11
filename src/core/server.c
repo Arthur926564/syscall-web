@@ -40,33 +40,49 @@ void server_loop(int server_fd) {
             switch (conn->state) {
 
             case CONN_READING_HEADERS: {
-                char tmp[4096];
-                ssize_t n = read(conn->fd, tmp, sizeof(tmp));
+				while (1) {
 
-                if (n <= 0) {
-                    conn->state = CONN_CLOSED;
-                    break;
-                }
+                	int consumed = http_parse_request(&conn->in, req);
+					conn->keep_alive = keep_alive(req);
+	
+                	if (consumed < 0) {
+						printf("malformed request \n");
+						for (size_t i = 0; i < conn->in.len; i++) {
+							printf("%c", conn->in.data[i]);
+						}
+                    	// malformed request
+                    	buffer_consume(&conn->in, consumed);
+                    	conn->state = CONN_CLOSED;
+						break;
 
-                buffer_append(&conn->in, tmp, (size_t)n);
+                	} else if (consumed == 0) {
+                		char tmp[4096];
+                		ssize_t n = read(conn->fd, tmp, sizeof(tmp));
+                		buffer_append(&conn->in, tmp, (size_t)n);
+                    	// need more data → stay in this state
 
-                int consumed = http_parse_request(&conn->in, req);
+                	} else {
+                    	// headers complete
 
-                if (consumed < 0) {
-                    // malformed request
-                    conn->state = CONN_CLOSED;
-                } else if (consumed == 0) {
-                    // need more data → stay in this state
-                } else {
-                    // headers complete
-                    buffer_consume(&conn->in, consumed);
-
-                    if (consumed == 3)
-                        conn->state = CONN_READING_BODY;
-                    else
-                        conn->state = CONN_WRITING;
-                }
-                break;
+						// printf("\n");
+						// printf("this is the next version\n");
+						// for (size_t i = 0; i < conn->in.len; i++) {
+						// 	printf("%c", conn->in.data[i]);
+						// }
+						// printf("\n");
+						// printf("consumed: %d \n", consumed);
+						// printf("\n");
+						//               	buffer_consume(&conn->in, consumed);
+						// printf("this is the next version\n");
+						// for (size_t i = 0; i < conn->in.len; i++) {
+						// 	printf("%c", conn->in.data[i]);
+						// }
+	
+                    	conn->state = CONN_WRITING;
+						break;
+                	}
+					
+				}
             }
 
             case CONN_READING_BODY:
@@ -76,13 +92,21 @@ void server_loop(int server_fd) {
             case CONN_WRITING:
                 handle_request(req, conn);
 
-                write(conn->fd, conn->out.data, conn->out.len);
+
+				size_t total_written = 0;
+				while (total_written < conn->out.len) {
+					ssize_t n = write(conn->fd, conn->out.data + total_written, conn->out.len - total_written);
+					if (n <= 0) {
+						perror("write error");
+						break;
+					}
+					total_written += (size_t)n;
+				}
 				buffer_init(&conn->out);
 
 				const char* connection_header = get_header(req, "Connection");
 				
-                if (connection_header && !strcmp(connection_header, "keep-alive")) {
-					printf("is this correct or not?\n");
+                if (conn->keep_alive) {
                     http_request_reset(req);
                     conn->state = CONN_READING_HEADERS;
                 } else {
