@@ -18,6 +18,7 @@ typedef struct {
 	buffer_t out;
 	http_request_t req;
 	conn_state_t state;
+	int write_offset;
 	bool keep_alive;
 } connection_t;
 

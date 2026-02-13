@@ -36,7 +36,7 @@ void http_response_write_file(buffer_t *out,
 	char header[512];
 	int header_len;
 	if (conn->keep_alive) {
-		printf("we are in keep alive \n");
+
 		header_len = snprintf(
     		header,
     		sizeof(header),
@@ -50,7 +50,6 @@ void http_response_write_file(buffer_t *out,
 		);
 
 	} else {
-		printf("we are in close connection \n");
 		char header[512];
 		header_len = snprintf(
     		header,
