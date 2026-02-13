@@ -36,15 +36,15 @@ The server is split into layers:
 ## Limitations
 - no HTTPS 
 - No chunked transfer encoding 
-- no keep-alive (connection are closed after the  response)
+- ~~no keep-alive (connection are closed after the  response)~~
 - Single threaded, blocking I/O
 
 
 ## Possible improvements
-- HTTP headers parsing
-- POST request & body parsing
-- keep-alive support 
-- `epoll` / non-blocking I/O
+- ~~HTTP headers parsing~~
+- ~~POST request & body parsing~~
+- ~~keep-alive support~~
+- ~~`epoll` / non-blocking I/O~~
 - thread pool
 - Directory listing
 - Basic api endpoints
