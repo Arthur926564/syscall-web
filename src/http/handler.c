@@ -68,6 +68,7 @@ void handle_read(int epfd, connection_t *conn) {
     if (consumed == 0) {
         return;
     }
+	conn->keep_alive = keep_alive(&conn->req);
 
     // Request complete
 
@@ -100,7 +101,6 @@ void handle_write(int epfd, connection_t *conn) {
             conn->out.data + conn->write_offset,
             conn->out.len - conn->write_offset
         );
-		printf("[handle_write] fd=%d write_offset=%zu out_len=%zu wrote=%zd\n",conn->fd, conn->write_offset, conn->out.len, n);
 
         if (n > 0) {
             conn->write_offset += (size_t)n;

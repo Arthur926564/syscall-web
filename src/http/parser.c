@@ -76,7 +76,7 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
         data[i] = saved;
         i += 2; 
     }
-    return i;
+    return i + 2;
 }
 
 
