@@ -1,5 +1,6 @@
 
 #include "http/handler.h"
+#include "os/fs.h"
 #include "util/buffer.h"
 #include "core/connection.h"
 #include "static/static.h"

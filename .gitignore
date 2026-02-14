@@ -1,3 +1,40 @@
 .clangd
 Makefile
 compile_flags.txt
+# ======================
+# LaTeX temporary files
+# ======================
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+
+# LuaLaTeX specific
+*.lua
+*.luac
+*.lol
+*.sty
+
+# Latexmk
+*.xdv
+
+# ======================
+# Editors
+# ======================
+*.swp
+*~
+.DS_Store
+
+# ======================
+# Build directories
+# ======================
+build/

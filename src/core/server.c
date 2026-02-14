@@ -2,7 +2,6 @@
 #include "os/fs.h"
 #include "util/buffer.h"
 #include "core/connection.h"
-#include "http/parser.h"
 #include "http/handler.h"
 #include "net/tcp.h"
 #include <asm-generic/errno-base.h>
@@ -41,10 +40,10 @@ void server_loop(int server_fd) {
 
 	int epoll_ctl_res = epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev);
 
-	struct epoll_event events[32];
+	struct epoll_event events[128];
 	while (1) {
 		
-		int n = epoll_wait(epfd, events, 32, -1);
+		int n = epoll_wait(epfd, events, 128, -1);
 		if (n == -1) {
 			if (errno == EINTR) {
 				continue;
@@ -108,6 +107,7 @@ void server_loop(int server_fd) {
 
 
 
-void server_shutdown() {
+void server_shutdown(int server_fd) {
+	os_close(server_fd);
 	printf("this server is shutting down \n");
 }
