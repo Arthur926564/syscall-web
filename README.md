@@ -3,8 +3,8 @@ This is a personal project I will be wroking on during the winter break, the goa
 
 ### What?
 A small HTTP/1.1 server written in C from scratch using POSIX sockets.
-It supports serving static files (HTML, CSS, Javascript, images) from `www/` directory and is designed with a layered architecture see docs here: [docs.pdf](https://github.com/user-attachments/files/25325523/docs.pdf)
-.
+It supports serving static files (HTML, CSS, Javascript, images) from `www/` directory and is designed with a layered architecture. (see docs here: [docs.pdf](https://github.com/user-attachments/files/25325523/docs.pdf))
+
 
 ## Build
 Requires:
