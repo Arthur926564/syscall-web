@@ -1,9 +1,10 @@
 # HTTP Server from scratch written in c
-This is a personal project I will be wroking on during the winter break, the goal is to learn more about linux, http request, filesystem, etc..., and also learn c.
+This is a personal project I will be wroking on during the winter break, the goal is to learn more about linux, network, filesystem, etc..., and also learn c.
 
 ### What?
 A small HTTP/1.1 server written in C from scratch using POSIX sockets.
-It supports serving static files (HTML, CSS, Javascript, images) from `www/` directory and is designed with a layered architecture.
+It supports serving static files (HTML, CSS, Javascript, images) from `www/` directory and is designed with a layered architecture see docs here: [docs.pdf](https://github.com/user-attachments/files/25325523/docs.pdf)
+.
 
 ## Build
 Requires:
