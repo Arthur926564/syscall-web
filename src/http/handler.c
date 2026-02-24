@@ -8,7 +8,11 @@
 #include "http/http_response.h"
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
+#include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -24,13 +28,22 @@ void handle_request(http_request_t *req, connection_t *conn) {
 }
 
 void handle_read(int epfd, connection_t *conn) {
-    char tmp[4096];
 
     while (1) {
-        ssize_t n = read(conn->fd, tmp, sizeof(tmp));
+		int avail = buffer_ensure_writable(&conn->in, 4096);
+		char * ptr = write_ptr(&conn->in);
+		
+
+		if (avail < 0) {
+			perror("available error");
+			conn->state = CONN_CLOSED;
+			return;
+		}
+
+        ssize_t n = read(conn->fd, ptr, avail);
 
         if (n > 0) {
-            buffer_append(&conn->in, tmp, (size_t)n);
+			produce(&conn->in, n);
         }
         else if (n == 0) {
             // client closed connection
