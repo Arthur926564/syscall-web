@@ -74,7 +74,7 @@ This report presents the design and performance evaluation of a minimal HTTP/1.1
 
 \section{Introduction}
 
-The goal of this project was to gain a deeper understanding of HTTP and network programming. You can find the github repositories at this \href{https://github.com/Arthur926564/syscall-web}{link} Therefore, I started this project as a simple blocking, one threaded, loop-based server. After understanding those fundamental I implemented headers parsing which enabled persistent (keep-alive) connections. The goal after that introduction is to have a very efficient server which is scalable. Those reasons motivated the transition to a non-blocking server architecture. Allowing the server to handle multiple connections concurrently using asynchronous I/O.
+The goal of this project was to gain a deeper understanding of HTTP and network programming. You can find the github repositories at this \href{https://github.com/Arthur926564/syscall-web}{link}. I started this project as a simple blocking, one threaded, loop-based server. After understanding those fundamental I implemented headers parsing which enabled persistent (keep-alive) connections. The goal after that introduction is to have a very efficient server and is scalable. Those reasons motivated the transition to a non-blocking server architecture. Allowing the server to handle multiple connections concurrently using asynchronous I/O.
 \section{Architecture}
 The server follows an event-driven architecture based on a single-threaded reactor pattern. The architecture of this server is divided into 7 parts:
 
