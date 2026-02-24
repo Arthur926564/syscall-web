@@ -99,7 +99,7 @@ void handle_write(int epfd, connection_t *conn) {
 
         ssize_t n = write(
             conn->fd,
-            conn->out.data + conn->write_offset,
+            conn->out.data + conn->out.start + conn->write_offset,
             buffer_len(&conn->out) - conn->write_offset
         );
 

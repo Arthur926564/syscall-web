@@ -29,7 +29,7 @@ int find_header(char *line, http_header_t *header) {
 }
 
 int http_parse_request(buffer_t *in, http_request_t *req) {
-    char *data = in->data;
+    char *data = in->data + in->start;
     size_t len = buffer_len(in);
     size_t i = 0;
 
