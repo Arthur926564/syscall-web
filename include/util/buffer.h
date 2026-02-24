@@ -5,8 +5,9 @@
 
 typedef struct {
 	char *data;
-	size_t len;
 	size_t cap;
+	size_t start;
+	size_t end;
 } buffer_t;
 
 
@@ -18,5 +19,18 @@ void buffer_consume(buffer_t *b, size_t n);
 
 char *buffer_data(buffer_t *b);
 size_t buffer_len(buffer_t *b);
+
+char *write_ptr(buffer_t * b);
+size_t write_avail(buffer_t *b);
+
+char *read_ptr(buffer_t *b);
+
+
+/**
+ * tells the buffer that it has succesfuly wrote n bytes into the write_ptr region
+ */
+void produce(buffer_t *b, size_t n);
+
+int buffer_ensure_writable(buffer_t *b, size_t min_free);
 
 #endif

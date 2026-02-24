@@ -10,11 +10,13 @@ connection_t *connection_create(int fd) {
 	connection->state = CONN_READING_HEADERS;
 	connection->in.data = NULL;
 	connection->in.cap = 0;
-	connection->in.len = 0;
+	connection->in.start = 0;
+	connection->in.end = 0;
 
 	connection->out.data = NULL;
-	connection->out.len = 0;
 	connection->out.cap = 0;
+	connection->out.start = 0;
+	connection->out.end = 0;
 	return connection;
 }
 
