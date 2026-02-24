@@ -95,12 +95,12 @@ void handle_read(int epfd, connection_t *conn) {
 
 void handle_write(int epfd, connection_t *conn) {
 
-    while (conn->write_offset < conn->out.len) {
+    while (conn->write_offset < buffer_len(&conn->out)) {
 
         ssize_t n = write(
             conn->fd,
             conn->out.data + conn->write_offset,
-            conn->out.len - conn->write_offset
+            buffer_len(&conn->out) - conn->write_offset
         );
 
         if (n > 0) {

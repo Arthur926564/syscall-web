@@ -1,4 +1,5 @@
 #include "http/parser.h"
+#include "util/buffer.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -29,7 +30,7 @@ int find_header(char *line, http_header_t *header) {
 
 int http_parse_request(buffer_t *in, http_request_t *req) {
     char *data = in->data;
-    size_t len = in->len;
+    size_t len = buffer_len(in);
     size_t i = 0;
 
     // Parse request line

@@ -5,8 +5,9 @@
 
 typedef struct {
 	char *data;
-	size_t len;
 	size_t cap;
+	size_t start;
+	size_t end;
 } buffer_t;
 
 
