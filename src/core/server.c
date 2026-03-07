@@ -28,6 +28,63 @@ int server_init(int port) {
 
 }
 
+
+
+
+static void destroy_connection(int epfd, connection_t *conn) {
+	epoll_ctl(epfd, EPOLL_CTL_DEL, conn->fd, NULL);
+	close(conn->fd);
+	free(conn->in.data);
+	free(conn->out.data);
+	free(conn);
+}
+
+static void accept_new_clients(int epfd, int server_fd) {
+	struct sockaddr client_addr;
+	socklen_t addrlen = sizeof(client_addr);
+	int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
+	if (client_fd == -1) {
+		perror("accept");
+		return;
+	}
+	os_set_nonblocking(client_fd);
+	connection_t *conn = malloc(sizeof(connection_t));
+	conn->fd = client_fd;
+	buffer_init(&conn->in);
+	buffer_init(&conn->out);
+
+	conn->state = CONN_READING_HEADERS;
+
+	struct epoll_event cev;
+	cev.events = EPOLLIN | EPOLLET;
+	cev.data.ptr = conn;
+	if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &cev) == -1) {
+		perror("epoll_ctl client_fd");
+		close(client_fd);
+		free(conn);
+	}
+
+}
+
+static void process_connection_event(int epfd, struct epoll_event *ev) {
+				connection_t *conn = ev->data.ptr;
+
+				if (ev->events & EPOLLIN) {
+					handle_read(epfd, conn);
+				}
+				
+				if (ev->events & EPOLLOUT) {
+					handle_write(epfd, conn);
+				}
+
+				if (conn->state == CONN_CLOSED) {
+					epoll_ctl(epfd, EPOLL_CTL_DEL, conn->fd, NULL);
+					free(conn->in.data);
+					free(conn->out.data);
+					free(conn);
+				}
+}
+
 void server_loop(int server_fd) {
 	// create the epoll
 	int epfd = epoll_create(1);
@@ -56,48 +113,9 @@ void server_loop(int server_fd) {
 			struct epoll_event *ev = &events[i];
 
 			if (ev->data.ptr == NULL) {
-				struct sockaddr client_addr;
-				socklen_t addrlen = sizeof(client_addr);
-				int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
-				if (client_fd == -1) {
-					perror("accept");
-					continue;
-				}
-				os_set_nonblocking(client_fd);
-				connection_t *conn = malloc(sizeof(connection_t));
-				conn->fd = client_fd;
-				buffer_init(&conn->in);
-				buffer_init(&conn->out);
-
-				conn->state = CONN_READING_HEADERS;
-
-				struct epoll_event cev;
-				cev.events = EPOLLIN | EPOLLET;
-				cev.data.ptr = conn;
-				if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &cev) == -1) {
-					perror("epoll_ctl client_fd");
-					close(client_fd);
-					free(conn);
-				}
-
+				accept_new_clients(epfd, server_fd);
 			} else {
-				connection_t *conn = ev->data.ptr;
-
-				if (ev->events & EPOLLIN) {
-					handle_read(epfd, conn);
-				}
-				
-				if (ev->events & EPOLLOUT) {
-					handle_write(epfd, conn);
-				}
-
-				if (conn->state == CONN_CLOSED) {
-					epoll_ctl(epfd, EPOLL_CTL_DEL, conn->fd, NULL);
-					free(conn->in.data);
-					free(conn->out.data);
-					free(conn);
-				}
-
+				process_connection_event(epfd, ev);
 			}
 
 		}
