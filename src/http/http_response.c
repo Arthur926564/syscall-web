@@ -26,45 +26,30 @@ void http_response_write_404(buffer_t *out) {
 }
 
 
-
 void http_response_write_file(buffer_t *out,
-							char *data,
-							long size,
-							const char *content_type,
-							connection_t *conn) {
+                              long size,
+                              const char *content_type,
+                              connection_t *conn) {
+    char header[512];
+    int header_len;
 
-	char header[512];
-	int header_len;
-	if (conn->keep_alive) {
+    header_len = snprintf(
+        header,
+        sizeof(header),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Length: %ld\r\n"
+        "Content-Type: %s\r\n"
+        "Connection: %s\r\n"
+        "\r\n",
+        size,
+        content_type,
+        conn->keep_alive ? "keep-alive" : "close"
+    );
 
-		header_len = snprintf(
-    		header,
-    		sizeof(header),
-    		"HTTP/1.1 200 OK\r\n"
-    		"Content-Length: %ld\r\n"
-    		"Content-Type: %s\r\n"
-    		"Connection: keep-alive\r\n"
-    		"\r\n",
-    		size,          // first long (%ld)
-    		content_type   // second string (%s)
-		);
+    if (header_len < 0 || header_len >= (int)sizeof(header)) {
+        conn->state = CONN_CLOSED;
+        return;
+    }
 
-	} else {
-		char header[512];
-		header_len = snprintf(
-    		header,
-    		sizeof(header),
-    		"HTTP/1.1 200 OK\r\n"
-    		"Content-Length: %ld\r\n"
-    		"Content-Type: %s\r\n"
-    		"Connection: close\r\n"
-    		"\r\n",
-    		size,          // first long (%ld)
-    		content_type   // second string (%s)
-		);
-	}
-
-	buffer_append(out, header, header_len);
-	buffer_append(out, data, size);
-	
+    buffer_append(out, header, (size_t)header_len);
 }

@@ -8,38 +8,51 @@
 #include <magic.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 
 
 void static_serve(http_request_t *req, connection_t *conn) {
+    char filepath[MAX_PATH];
 
-	char filepath[MAX_PATH];
+    if (resolve_path(req->path, filepath) < 0) {
+        conn->sending_file = false;
+        http_response_write_404(&conn->out);
+        return;
+    }
 
-	if (resolve_path(req->path, filepath) < 0) {
-		http_response_write_404(&conn->out);
-		return;
-	}
-	FILE *f = fopen(filepath, "rb");
-	if (!f) {
-		http_response_write_404(&conn->out);
-		return;
-	}
+    int fd = open(filepath, O_RDONLY);
+    if (fd < 0) {
+        conn->sending_file = false;
+        http_response_write_404(&conn->out);
+        return;
+    }
 
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        conn->sending_file = false;
+        http_response_write_404(&conn->out);
+        return;
+    }
 
-	fseek(f, 0, SEEK_END);
-	long size = ftell(f);
+    if (!S_ISREG(st.st_mode)) {
+        close(fd);
+        conn->sending_file = false;
+        http_response_write_404(&conn->out);
+        return;
+    }
 
-	fseek(f, 0, SEEK_SET);
+    const char *content_type = get_content_type(filepath);
 
+    conn->file_fd = fd;
+    conn->file_offset = 0;
+    conn->file_size = st.st_size;
+    conn->sending_file = true;
 
-	char *data = malloc(size);
-	fread(data, 1,size, f);
-
-	const char *content_type = get_content_type(filepath);
-
-	http_response_write_file(&conn->out, data, size, content_type, conn);
-
-	fclose(f);
-	free(data);
+    http_response_write_file(&conn->out, st.st_size, content_type, conn);
 }
 
 const char* get_content_type(const char* path) {

@@ -1,5 +1,6 @@
 #include "core/connection.h"
 #include "http/handler.h"
+#include <stdbool.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -20,6 +21,13 @@ connection_t *connection_create(int fd) {
 	connection->out.cap = 0;
 	connection->out.start = 0;
 	connection->out.end = 0;
+
+	connection->write_offset = 0;
+	connection->keep_alive = false;
+	connection->file_fd = -1;
+	connection->file_offset = 0;
+	connection->file_size = 0;
+	connection->sending_file = false;
 	return connection;
 }
 

@@ -4,7 +4,7 @@
 
 
 
-void http_response_write_file(buffer_t *out, char *data, long size, const char *content_type, connection_t *conn);
+void http_response_write_file(buffer_t *out, long size, const char *content_type, connection_t *conn);
 
 void http_response_write_html(buffer_t *out, const char *html);
 

@@ -13,6 +13,7 @@ typedef enum {
 	CONN_CLOSED
 } conn_state_t;
 
+
 typedef struct {
 	int fd;
 	buffer_t in;
@@ -21,6 +22,11 @@ typedef struct {
 	conn_state_t state;
 	int write_offset;
 	bool keep_alive;
+
+	int file_fd;
+    off_t file_offset; 
+    off_t file_size;
+    bool sending_file;
 } connection_t;
 
 

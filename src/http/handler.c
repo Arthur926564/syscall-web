@@ -7,9 +7,11 @@
 #include "http/parser.h"
 #include "http/http_response.h"
 #include <asm-generic/errno-base.h>
+#include <asm-generic/errno.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/sendfile.h>
 #include <unistd.h>
 
 #define MAX_KEEP_CAP (64 * 1024)
@@ -141,10 +144,49 @@ void handle_write(int epfd, connection_t *conn) {
             return;
         }
     }
+	if (conn->write_offset == buffer_len(&conn->out)) {
+		buffer_reset_and_maybe_shrink(&conn->out, MAX_KEEP_CAP);
+		conn->write_offset = 0;
+	}
 
-
-	buffer_reset_and_maybe_shrink(&conn->out, MAX_KEEP_CAP);
-    conn->write_offset = 0;
+	if (conn->sending_file) {
+		while (conn->file_offset < conn->file_size) {
+			ssize_t n = sendfile(
+					conn->fd,
+					conn->file_fd,
+					&conn->file_offset,
+					(size_t)(conn->file_size - conn->file_offset)
+					);
+			if (n > 0) {
+				continue;
+			} else if (n < 0) {
+				if (errno == EINTR) {
+					continue;
+				}
+				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					return;
+				} else {
+					perror("sending_file");
+					close(conn->file_fd);
+					conn->file_fd = -1;
+					conn->sending_file = false;
+					conn->state = CONN_CLOSED;
+					return;
+				}
+			} else {
+				break;
+			}
+		}
+		if (conn->file_offset >= conn->file_size) {
+			close(conn->file_fd);
+			conn->file_fd = -1;
+			conn->file_offset = 0;
+			conn->file_size = 0;
+			conn->sending_file = false;
+		} else {
+			return;
+		}
+	}
 
     if (conn->keep_alive) {
         http_request_reset(&conn->req);
