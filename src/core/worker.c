@@ -25,7 +25,6 @@ int worker_init(worker_t *w) {
         perror("eventfd");
         return -1;
     }
-
     pthread_mutex_init(&w->mutex, NULL);
 
     w->pending_count = 0;

@@ -4,13 +4,16 @@
 #include <pthread.h>
 #include <stddef.h>
 
+
+#define WORKER_PENDING_CAPACITY 1024
+
 typedef struct {
 	int epfd;
 	int notify_fd;
 	pthread_t thread;
 	pthread_mutex_t mutex;
 
-	int *pending_fds;
+	int pending_fds[WORKER_PENDING_CAPACITY];
 	size_t pending_count;
 	size_t pending_capacity;
 } worker_t;

@@ -12,7 +12,6 @@
 
 void static_serve(http_request_t *req, connection_t *conn) {
 
-
 	char filepath[MAX_PATH];
 
 	if (resolve_path(req->path, filepath) < 0) {

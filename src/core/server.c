@@ -1,116 +1,74 @@
 #include "core/server.h"
-#include "os/fs.h"
-#include "util/buffer.h"
-#include "core/connection.h"
-#include "http/handler.h"
+#include "core/worker.h"
 #include "net/tcp.h"
-#include <asm-generic/errno-base.h>
+#include "os/fs.h"
+
 #include <errno.h>
-#include <stdlib.h>
-#include <sys/epoll.h>
-#include <stddef.h>
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
 #include <sys/socket.h>
-#include <time.h>
 #include <unistd.h>
 
-
+#define NWORKERS 2
 
 int server_init(int port) {
 	int server_fd = tcp_listen(port);
 	if (server_fd < 0) {
-		perror("tcp_accept error in server init");
+		perror("tcp_listen error in server_init");
 		return -1;
 	}
-	printf("Listening on port 8080\n");
+
+	printf("Listening on port %d\n", port);
 	return server_fd;
-
 }
 
+static void accept_and_dispatch(int server_fd, worker_t *workers, int nworkers) {
+	int next_worker = 0;
 
-
-
-static void accept_new_clients(int epfd, int server_fd) {
-	struct sockaddr client_addr;
-	socklen_t addrlen = sizeof(client_addr);
-	int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
-	if (client_fd == -1) {
-		perror("accept");
-		return;
-	}
-	os_set_nonblocking(client_fd);
-	connection_t *conn = calloc(1, sizeof(connection_t));
-	if (conn == NULL) {
-		perror("calloc");
-		close(client_fd);
-		return;
-	}
-	conn->fd = client_fd;
-	buffer_init(&conn->in);
-	buffer_init(&conn->out);
-
-	conn->state = CONN_READING_HEADERS;
-
-	struct epoll_event cev;
-	cev.events = EPOLLIN | EPOLLET;
-	cev.data.ptr = conn;
-	if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &cev) == -1) {
-		perror("epoll_ctl client_fd");
-		close(client_fd);
-		free(conn->in.data);
-		free(conn->out.data);
-		free(conn);
-	}
-
-}
-
-void server_loop(int server_fd) {
-	// create the epoll
-	int epfd = epoll_create(1);
-	if (epfd == -1) {
-		perror("epoll_create");
-		exit(1);
-	}
-	struct epoll_event ev;
-	ev.events = EPOLLIN;
-	ev.data.ptr = NULL;
-
-	if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
-		perror("epoll_ctl server_fd");
-		close(epfd);
-		exit(1);
-	}
-
-	struct epoll_event events[128];
 	while (1) {
-		
-		int n = epoll_wait(epfd, events, 128, -1);
-		if (n == -1) {
+		struct sockaddr client_addr;
+		socklen_t addrlen = sizeof(client_addr);
+
+		int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
+		if (client_fd == -1) {
 			if (errno == EINTR) {
 				continue;
 			}
-			perror("epoll wait");
+			perror("accept");
+			continue;
+		}
+
+		os_set_nonblocking(client_fd);
+
+		if (worker_enqueue_client(&workers[next_worker], client_fd) == -1) {
+			close(client_fd);
+		}
+
+		next_worker = (next_worker + 1) % nworkers;
+	}
+}
+
+void server_loop(int server_fd) {
+	worker_t workers[NWORKERS];
+
+	for (int i = 0; i < NWORKERS; i++) {
+		if (worker_init(&workers[i]) == -1) {
+			fprintf(stderr, "worker_init failed for worker %d\n", i);
+			close(server_fd);
 			exit(1);
 		}
 
-		for (size_t i = 0; i < n; i++) {
-			struct epoll_event *ev = &events[i];
-
-			if (ev->data.ptr == NULL) {
-				accept_new_clients(epfd, server_fd);
-			} else {
-				process_connection_event(epfd, ev);
-			}
-
+		if (worker_start(&workers[i]) == -1) {
+			fprintf(stderr, "worker_start failed for worker %d\n", i);
+			close(server_fd);
+			exit(1);
 		}
 	}
-	
+
+	accept_and_dispatch(server_fd, workers, NWORKERS);
 }
-
-
 
 void server_shutdown(int server_fd) {
 	os_close(server_fd);
-	printf("this server is shutting down \n");
+	printf("this server is shutting down\n");
 }
