@@ -1,9 +1,15 @@
 # HTTP Server from scratch written in c
-This is a personal project I will be wroking on during the winter break, the goal is to learn more about linux, network, filesystem, etc..., and also learn c.
+This is a personal project that I started during the winter break, the goal is to learn more about linux, network, filesystem, etc..., and also learn c.
 
 ### What?
-A small HTTP/1.1 server written in C from scratch using POSIX sockets.
-It supports serving static files (HTML, CSS, Javascript, images) from `www/` directory and is designed with a layered architecture. (see docs here: [docs.pdf](https://github.com/user-attachments/files/25325523/docs.pdf))
+This project is a lightweight HTTP/1.1 web server written in pure C. It is designed to handle multiple simultaneous client connections efficiently using a combination of non-blocking I/O, epoll, and multithreading.
+
+The server follows a worker-based architecture:
+- A main thread accepts incoming TCP connections
+- Connections are dispatched to a worker threads
+- Each worker run its own epoll event loop and handles all I/O for its assigned connections
+
+(this docs is not up to date: [docs.pdf](https://github.com/user-attachments/files/25325523/docs.pdf))
 
 
 ## Build
@@ -13,14 +19,14 @@ Requires:
 - POSIX environment
 
 Compile everything with
-```gcc src/**/*.c -Iinclude -o my_server```
+```gcc -pthread src/**/*.c -Iinclude -lmagic -o my_server  ```
 
 By default the server listens on `http://localhost:8080`
 
 
 ## Architecture Overview
 The server is split into layers:
-- OS  
+- OS
     - Read/Write raw bytes
 - TCP  
     - Accepts connections
@@ -38,7 +44,7 @@ The server is split into layers:
 - no HTTPS 
 - No chunked transfer encoding 
 - ~~no keep-alive (connection are closed after the  response)~~
-- Single threaded, blocking I/O
+- ~~Single threaded, blocking I/O~~
 
 
 ## Possible improvements
@@ -46,7 +52,7 @@ The server is split into layers:
 - ~~POST request & body parsing~~
 - ~~keep-alive support~~
 - ~~`epoll` / non-blocking I/O~~
-- thread pool
+- ~~thread pool~~
 - Directory listing
 - Basic api endpoints
 - IPv6 support 
