@@ -6,6 +6,7 @@
 #include "static/static.h"
 #include "http/parser.h"
 #include "http/http_response.h"
+#include <asm-generic/errno-base.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
@@ -17,6 +18,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#define MAX_KEEP_CAP (64 * 1024)
 
 void handle_request(http_request_t *req, connection_t *conn) {
 	if (is_static_request(req)) {
@@ -120,6 +123,9 @@ void handle_write(int epfd, connection_t *conn) {
             conn->write_offset += (size_t)n;
         }
         else if (n < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Socket not ready for more writing
                 return;
@@ -137,7 +143,7 @@ void handle_write(int epfd, connection_t *conn) {
     }
 
 
-    buffer_init(&conn->out);
+	buffer_reset_and_maybe_shrink(&conn->out, MAX_KEEP_CAP);
     conn->write_offset = 0;
 
     if (conn->keep_alive) {
@@ -148,7 +154,11 @@ void handle_write(int epfd, connection_t *conn) {
         ev.events = EPOLLIN;
         ev.data.ptr = conn;
 
-        epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
+        if (epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) == -1) {
+			perror("epoll_ctl MODE EPOLLIN");
+			conn->state = CONN_CLOSED;
+			return;
+		}
     }
     else {
         conn->state = CONN_CLOSED;

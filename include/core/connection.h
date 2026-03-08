@@ -2,6 +2,7 @@
 #define CORE_CONNECTION_H
 
 #include <stddef.h>
+#include <sys/epoll.h>
 #include "http/parser.h"
 #include "util/buffer.h"
 
@@ -25,6 +26,10 @@ typedef struct {
 
 connection_t *connection_create(int fd);
 
+void destroy_connection(int epfd, connection_t *conn);
+
 void connection_destroy(connection_t *connection);
+
+void process_connection_event(int epfd, struct epoll_event *ev);
 
 #endif

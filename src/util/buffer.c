@@ -19,6 +19,20 @@ void buffer_free(buffer_t *b) {
 	free(b->data);
 }
 
+
+void buffer_reset_and_maybe_shrink(buffer_t *b, size_t max_keep_cap) {
+	if (!b) {
+		return;
+	}
+	if (b->cap > max_keep_cap) {
+		free(b->data);
+		b->data = NULL;
+		b->cap = 0;
+	}
+	b->start = 0;
+	b->end = 0;
+}
+
 void buffer_append(buffer_t *b, const void *data, size_t n) {
 	if (!b) {
 		perror("empty buffer");

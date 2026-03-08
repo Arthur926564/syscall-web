@@ -1,5 +1,8 @@
 #include "core/connection.h"
+#include "http/handler.h"
 #include <stdlib.h>
+#include <sys/epoll.h>
+#include <unistd.h>
 
 
 connection_t *connection_create(int fd) {
@@ -26,4 +29,31 @@ void connection_destroy(connection_t *connection) {
 	free(connection->in.data);
 	free(connection->out.data);
 	free(connection);
+}
+
+void destroy_connection(int epfd, connection_t *conn) {
+	epoll_ctl(epfd, EPOLL_CTL_DEL, conn->fd, NULL);
+	close(conn->fd);
+	free(conn->in.data);
+	free(conn->out.data);
+	free(conn);
+}
+
+void process_connection_event(int epfd, struct epoll_event *ev) {
+	connection_t *conn = ev->data.ptr;
+	if (ev->events & (EPOLLERR | EPOLLHUP)) {
+		conn->state = CONN_CLOSED;
+	}
+
+	if (ev->events & EPOLLIN) {
+		handle_read(epfd, conn);
+	}
+	
+	if (conn->state != CONN_CLOSED && ev->events & EPOLLOUT) {
+		handle_write(epfd, conn);
+	}
+
+	if (conn->state == CONN_CLOSED) {
+		destroy_connection(epfd, conn);
+	}
 }
