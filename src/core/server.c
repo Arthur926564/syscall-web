@@ -48,7 +48,12 @@ static void accept_new_clients(int epfd, int server_fd) {
 		return;
 	}
 	os_set_nonblocking(client_fd);
-	connection_t *conn = malloc(sizeof(connection_t));
+	connection_t *conn = calloc(1, sizeof(connection_t));
+	if (conn == NULL) {
+		perror("calloc");
+		close(client_fd);
+		return;
+	}
 	conn->fd = client_fd;
 	buffer_init(&conn->in);
 	buffer_init(&conn->out);
@@ -61,6 +66,8 @@ static void accept_new_clients(int epfd, int server_fd) {
 	if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &cev) == -1) {
 		perror("epoll_ctl client_fd");
 		close(client_fd);
+		free(conn->in.data);
+		free(conn->out.data);
 		free(conn);
 	}
 
@@ -68,20 +75,20 @@ static void accept_new_clients(int epfd, int server_fd) {
 
 static void process_connection_event(int epfd, struct epoll_event *ev) {
 				connection_t *conn = ev->data.ptr;
+				if (ev->events & (EPOLLERR | EPOLLHUP)) {
+					conn->state = CONN_CLOSED;
+				}
 
 				if (ev->events & EPOLLIN) {
 					handle_read(epfd, conn);
 				}
 				
-				if (ev->events & EPOLLOUT) {
+				if (conn->state != CONN_CLOSED && ev->events & EPOLLOUT) {
 					handle_write(epfd, conn);
 				}
 
 				if (conn->state == CONN_CLOSED) {
-					epoll_ctl(epfd, EPOLL_CTL_DEL, conn->fd, NULL);
-					free(conn->in.data);
-					free(conn->out.data);
-					free(conn);
+					destroy_connection(epfd, conn);
 				}
 }
 
@@ -90,12 +97,17 @@ void server_loop(int server_fd) {
 	int epfd = epoll_create(1);
 	if (epfd == -1) {
 		perror("epoll_create");
+		exit(1);
 	}
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
 	ev.data.ptr = NULL;
 
-	int epoll_ctl_res = epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev);
+	if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+		perror("epoll_ctl server_fd");
+		close(epfd);
+		exit(1);
+	}
 
 	struct epoll_event events[128];
 	while (1) {
