@@ -9,7 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define NWORKERS 2
+#define NWORKERS 4
 
 int server_init(int port) {
 	int server_fd = tcp_listen(port);

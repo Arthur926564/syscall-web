@@ -38,6 +38,7 @@ void static_serve(http_request_t *req, connection_t *conn) {
 
 	http_response_write_file(&conn->out, data, size, content_type, conn);
 
+	fclose(f);
 	free(data);
 }
 

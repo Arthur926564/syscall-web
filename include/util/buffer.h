@@ -33,4 +33,7 @@ void produce(buffer_t *b, size_t n);
 
 int buffer_ensure_writable(buffer_t *b, size_t min_free);
 
+
+void buffer_reset_and_maybe_shrink(buffer_t *b, size_t max_keep_cap);
+
 #endif
