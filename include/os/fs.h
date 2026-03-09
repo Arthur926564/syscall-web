@@ -3,6 +3,11 @@
 
 #include <stddef.h>  // for size_t
 #include <unistd.h>
+/**
+ * =================================
+ * Except for the os_set_nonblocking, os_close all other function is not use
+ * =================================
+ */
 
 /**
  * Open a file and return a file descriptor (fd)

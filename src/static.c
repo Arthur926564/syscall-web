@@ -1,7 +1,3 @@
-#include <stdlib.h>
-#define WWW_ROOT "./www"
-#define MAX_PATH 512
-
 #include "static/static.h"
 #include <stdbool.h>
 #include "http/http_response.h"
@@ -12,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define WWW_ROOT "./www"
+#define MAX_PATH 512
 
 
 void static_serve(http_request_t *req, connection_t *conn) {

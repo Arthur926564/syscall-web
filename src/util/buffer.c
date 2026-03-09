@@ -17,6 +17,10 @@ void buffer_free(buffer_t *b) {
 	if (!b) return;
 	
 	free(b->data);
+	b->data = NULL;
+	b->cap = 0;
+	b->start = 0;
+	b->end = 0;
 }
 
 
@@ -34,17 +38,17 @@ void buffer_reset_and_maybe_shrink(buffer_t *b, size_t max_keep_cap) {
 }
 
 void buffer_append(buffer_t *b, const void *data, size_t n) {
-	if (!b) {
-		perror("empty buffer");
+	if (!b || !data || n == 0) {
+		perror("empty buffer or data, or n = 0");
 		return;
 	}
+	size_t len = buffer_len(b);
 	// In case we need to free up some space
 	if (b->cap < n + b->end) {
-		if (b->start > 0 && n + buffer_len(b) <= b->cap)  {
-			size_t old_len = buffer_len(b);
-			memmove(b->data, b->data + b->start, old_len);
+		if (b->start > 0 && n + len <= b->cap)  {
+			memmove(b->data, b->data + b->start, len);
 			b->start = 0;
-			b->end = old_len;
+			b->end = len;
 			
 		} else {
 			size_t new_cap = b->cap ? b->cap : 16;
@@ -69,7 +73,17 @@ void buffer_append(buffer_t *b, const void *data, size_t n) {
 
 void buffer_consume(buffer_t *b, size_t n) {
 	if (!b || n == 0) return ;
+	size_t len = buffer_len(b);
+	if (n >= len) {
+		b->start =0;
+		b->end = 0;
+		return;
+	}
 	b->start += n;
+	if (b->start == b->end) {
+		b->start = 0;
+		b->end = 0;
+	}
 }
 
 char *buffer_data(buffer_t *b) {
@@ -112,10 +126,15 @@ char *read_ptr(buffer_t *b) {
 
 
 void produce(buffer_t *b, size_t n) {
-	b->end += n;
+	if (!b) {
+		perror("produce buffer empty");
+		return;
+	}
 	if (b->end > b->cap) {
 		perror("We have an overflow");
+		return;
 	}
+	b->end += n;
 }
 
 
