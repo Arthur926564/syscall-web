@@ -9,7 +9,6 @@ The server follows a worker-based architecture:
 - Connections are dispatched to a worker threads
 - Each worker run its own epoll event loop and handles all I/O for its assigned connections
 
-(this docs is not up to date: [docs.pdf](https://github.com/user-attachments/files/25325523/docs.pdf))
 
 
 ## Build
