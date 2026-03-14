@@ -41,7 +41,8 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
                        req->method,
                        req->path,
                        req->version) != 3) {
-                return -1;
+				req->valid = INVALID;
+				return -1;
             }
             data[i] = '\r';
             i += 2; 
@@ -53,16 +54,20 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
     req->header_count = 0;
 
     // Parse headers
-    while (i + 3 < len) {
-        if (data[i] == '\r' && data[i+1] == '\n' &&
-            data[i+2] == '\r' && data[i+3] == '\n') {
-            consumed = i + 4; 
+    while (i + 1 < len) {
+        if (data[i - 2] == '\r' && data[i - 1] == '\n' &&
+            data[i] == '\r' && data[i+1] == '\n') {
+            consumed = i + 2; 
             break;
         }
 
         size_t line_start = i;
         while (i + 1 < len && !(data[i] == '\r' && data[i+1] == '\n')) i++;
-        if (i + 1 >= len) break; 
+        if (i + 1 >= len) { 
+			req->valid  = INCOMPLETE;
+			return -1;
+			break; 
+		}
 
         char saved = data[i];
         data[i] = '\0';
@@ -73,24 +78,17 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
                 req->headers[req->header_count++] = header;
             }
         }
-
         data[i] = saved;
         i += 2; 
     }
-    return i + 2;
+	req->valid = COMPLETE;
+    return consumed;
 }
 
 
 
 void http_request_reset(http_request_t *req) {
 	req->header_count = 0;
-	memset(req->method, 0, sizeof(req->method));
-	memset(req->path, 0, sizeof(req->path));
-	memset(req->version, 0, sizeof(req->version));
-	for (size_t i = 0; i < 32; i++) {
-		req->headers[i].key[0] = '\0';
-		req->headers[i].value[0] = '\0';
-	}
 }
 
 const char * get_header(http_request_t *req, const char *key) {

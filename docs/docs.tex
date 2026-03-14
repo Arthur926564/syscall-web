@@ -260,6 +260,15 @@ A danger with multi-threading is the have mutliple thread handling the \importan
 The goal is to have a queue for incoming HTTP requests and a pool of thread for satisfying them. The server take the first request from the queue and assignes a free thread from the pool.\\
 What would be running is basically $n$ current server running independently.
 
+
+\paragraph{Benchmark Results}
+
+The server was benchmarked on a ThinkPad T16 (Intel Ultra~7~155U) running Arch Linux using \texttt{wrk}. The workload consisted of static file serving over \texttt{localhost} with multiple concurrent connections. For a $1\,\mathrm{MiB}$ file and $400$ concurrent connections, the server sustained approximately $9{,}563$ requests per second, corresponding to a throughput of roughly $9.34\,\mathrm{GB/s}$. The average request latency under this load was approximately $72.9\,\mathrm{ms}$, reflecting the cost of transferring large responses under high concurrency. 
+
+For smaller responses ($100\,\mathrm{KiB}$ files), the server achieved significantly higher request rates, reaching approximately $123{,}500$ requests per second and a transfer rate of about $11.8\,\mathrm{GB/s}$, with an average latency of $2.56\,\mathrm{ms}$ at $400$ concurrent connections. These results indicate that the implementation scales well with concurrency and is capable of sustaining high throughput for cached static content. 
+
+During long keep-alive stress tests, a rare connection reset was observed, suggesting a minor edge case in persistent connection lifecycle handling. When forcing connection closure after each response, the error disappeared while maintaining essentially identical throughput ($124{,}300$ requests per second), indicating that the core request/response path is stable and that further work primarily concerns robustness of persistent connection state transitions.
+
 \paragraph{HTTPS support}%
 \label{par:HTTPS support}
 Moving from HTTP to HTTPS requires an SSL/TLS certificate. If I understood right what is needed, OpenSSl is the standard way of doing it. By adding this new encryption the architecture of the server will actually change by adding a new TLS layer between the HTTP and the connection layer.\\

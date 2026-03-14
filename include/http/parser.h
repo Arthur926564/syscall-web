@@ -10,12 +10,19 @@ typedef struct {
 	char value[256];
 } http_header_t;
 
+typedef enum {
+	INVALID,
+	INCOMPLETE,
+	COMPLETE
+} request_valid_t;
+
 typedef struct {
 	char method[8];
 	char path[256];
 	char version[16];
 	http_header_t headers[32];
 	int header_count;
+	request_valid_t valid;
 } http_request_t;
 
 const char * get_header(http_request_t *req, const char* key);
