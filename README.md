@@ -58,3 +58,11 @@ The server is split into layers:
 - IPv6 support 
 - Security hardening (needed)
 
+
+
+### Current improvements
+The goal of this section is just for me to "store" the result I have in comparaison to a nginx server.
+I added a startup-time static file cache that preloads metadata for files under www/, avoiding repeated path resolution, file opening, and fstat on every request. On the 100k.bin benchmark with wrk -t8 -c400 -d30s, throughput improved from about 124k req/s to 143k req/s, a gain of roughly 16%.
+
+To have a better understanding on what this means, nginx on my machine using the same file is doing 29k Req/seq, this webserver is currently doing 18k Req/seq (using wrk as a benchmarker)
+```wrk -t8 -c400 -d30s http://127.0.0.1:8081/100k.bin```
