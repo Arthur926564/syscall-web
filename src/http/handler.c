@@ -1,6 +1,5 @@
 
 #include "http/handler.h"
-#include "os/fs.h"
 #include "util/buffer.h"
 #include "core/connection.h"
 #include "static/static.h"
@@ -10,7 +9,6 @@
 #include <asm-generic/errno.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -77,7 +75,7 @@ void handle_read(int epfd, connection_t *conn) {
         conn->write_offset = 0;
 
         struct epoll_event ev;
-        ev.events = EPOLLOUT;
+        ev.events = EPOLLOUT | EPOLLET;
         ev.data.ptr = conn;
 
         epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
@@ -104,7 +102,7 @@ void handle_read(int epfd, connection_t *conn) {
     conn->write_offset = 0;
 
     struct epoll_event ev;
-    ev.events = EPOLLOUT;
+    ev.events = EPOLLOUT | EPOLLET;
     ev.data.ptr = conn;
 
     epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
@@ -193,7 +191,7 @@ void handle_write(int epfd, connection_t *conn) {
         conn->state = CONN_READING_HEADERS;
 
         struct epoll_event ev;
-        ev.events = EPOLLIN;
+        ev.events = EPOLLIN | EPOLLET;
         ev.data.ptr = conn;
 
         if (epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) == -1) {

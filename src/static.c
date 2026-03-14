@@ -1,4 +1,5 @@
 #include "static/static.h"
+#include <dirent.h>
 #include <stdbool.h>
 #include "http/http_response.h"
 #include <magic.h>
@@ -12,45 +13,29 @@
 #define MAX_PATH 512
 
 
+static_file_cache_t g_static_cache;
+
 void static_serve(http_request_t *req, connection_t *conn) {
-    char filepath[MAX_PATH];
+	const static_file_entry_t *entry = static_cache_lookup(&g_static_cache, req->path);
 
-    if (resolve_path(req->path, filepath) < 0) {
+    if (!entry) {
         conn->sending_file = false;
         http_response_write_404(&conn->out);
         return;
     }
 
-    int fd = open(filepath, O_RDONLY);
-    if (fd < 0) {
-        conn->sending_file = false;
-        http_response_write_404(&conn->out);
-        return;
-    }
 
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-        close(fd);
-        conn->sending_file = false;
-        http_response_write_404(&conn->out);
-        return;
-    }
+    conn->file_fd = dup(entry->fd);
+	if (conn->file_fd < 0) {
+		conn->sending_file = false;
+		http_response_write_404(&conn->out);
+	}
 
-    if (!S_ISREG(st.st_mode)) {
-        close(fd);
-        conn->sending_file = false;
-        http_response_write_404(&conn->out);
-        return;
-    }
-
-    const char *content_type = get_content_type(filepath);
-
-    conn->file_fd = fd;
     conn->file_offset = 0;
-    conn->file_size = st.st_size;
+    conn->file_size = entry->size;
     conn->sending_file = true;
 
-    http_response_write_file(&conn->out, st.st_size, content_type, conn);
+    http_response_write_file(&conn->out, entry->size, entry->content_type, conn);
 }
 
 const char* get_content_type(const char* path) {
@@ -83,4 +68,114 @@ int resolve_path(const char *url, char *out_path) {
 	snprintf(out_path, MAX_PATH, "%s%s", WWW_ROOT, url);
 	return 0;
 	
+}
+
+
+
+static int scan_dir(static_file_cache_t *cache, const char *root, const char *current);
+const char *get_content_type(const char *path); // your existing function
+
+int static_cache_init(static_file_cache_t *cache, const char *root_dir) {
+    if (!cache || !root_dir) return -1;
+    cache->count = 0;
+    return scan_dir(cache, root_dir, root_dir);
+}
+
+static int scan_dir(static_file_cache_t *cache, const char *root, const char *current) {
+    DIR *dir = opendir(current);
+    if (!dir) {
+        perror("opendir");
+        return -1;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        char fullpath[MAX_FILEPATH_LEN];
+        int n = snprintf(fullpath, sizeof(fullpath), "%s/%s", current, entry->d_name);
+        if (n < 0 || (size_t)n >= sizeof(fullpath)) {
+            continue;
+        }
+
+        struct stat st;
+        if (stat(fullpath, &st) < 0) {
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            scan_dir(cache, root, fullpath);
+            continue;
+        }
+
+        if (!S_ISREG(st.st_mode)) {
+            continue;
+        }
+
+        if (cache->count >= MAX_STATIC_FILES) {
+            fprintf(stderr, "static cache full\n");
+            closedir(dir);
+            return -1;
+        }
+
+        static_file_entry_t *e = &cache->entries[cache->count++];
+
+        memset(e, 0, sizeof(*e));
+        strncpy(e->path, fullpath, sizeof(e->path) - 1);
+
+        const char *relative = fullpath + strlen(root);
+        if (*relative == '\0') {
+            strncpy(e->url, "/", sizeof(e->url) - 1);
+        } else {
+            strncpy(e->url, relative, sizeof(e->url) - 1);
+        }
+
+        e->size = st.st_size;
+        e->content_type = get_content_type(fullpath);
+
+        e->fd = open(fullpath, O_RDONLY | O_CLOEXEC);
+        if (e->fd < 0) {
+            perror("open cached file");
+            cache->count--;
+            continue;
+        }
+
+        if (strcmp(e->url, "/index.html") == 0) {
+            // support "/" lookup too if you want
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+const static_file_entry_t *static_cache_lookup(static_file_cache_t *cache, const char *url) {
+    if (!cache || !url) return NULL;
+
+    if (strcmp(url, "/") == 0) {
+        url = "/index.html";
+    }
+
+    for (size_t i = 0; i < cache->count; i++) {
+        if (strcmp(cache->entries[i].url, url) == 0) {
+            return &cache->entries[i];
+        }
+    }
+
+    return NULL;
+}
+
+void static_cache_destroy(static_file_cache_t *cache) {
+    if (!cache) return;
+
+    for (size_t i = 0; i < cache->count; i++) {
+        if (cache->entries[i].fd >= 0) {
+            close(cache->entries[i].fd);
+            cache->entries[i].fd = -1;
+        }
+    }
+
+    cache->count = 0;
 }

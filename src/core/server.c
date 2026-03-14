@@ -2,8 +2,10 @@
 #include "core/worker.h"
 #include "net/tcp.h"
 #include "os/fs.h"
+#include "static/static.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -18,7 +20,11 @@ int server_init(int port) {
 		return -1;
 	}
 
-	printf("Listening on port %d\n", port);
+	if (static_cache_init(&g_static_cache, "./www") < 0) {
+		fprintf(stderr, "failed to initialize static cache\n");
+		exit(1);
+	}
+
 	return server_fd;
 }
 
@@ -71,4 +77,5 @@ void server_loop(int server_fd) {
 void server_shutdown(int server_fd) {
 	os_close(server_fd);
 	printf("this server is shutting down\n");
+	static_cache_destroy(&g_static_cache);
 }
