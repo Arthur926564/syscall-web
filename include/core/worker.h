@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 
-#define WORKER_PENDING_CAPACITY 1024
+#define WORKER_PENDING_CAPACITY 4096
 
 typedef struct {
 	int epfd;
