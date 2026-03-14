@@ -36,4 +36,7 @@ int is_static_request(http_request_t *req);
 
 bool keep_alive(http_request_t *req);
 
+
+int http_scan(const char * data, char* method, char* path, char* version);
+
 #endif

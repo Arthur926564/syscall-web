@@ -28,6 +28,7 @@ int find_header(char *line, http_header_t *header) {
 	return 0;
 }
 
+
 int http_parse_request(buffer_t *in, http_request_t *req) {
     char *data = read_ptr(in);
     size_t len = buffer_len(in);
@@ -36,15 +37,48 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
     // Parse request line
     for (; i + 1 < len; i++) {
         if (data[i] == '\r' && data[i+1] == '\n') {
-            data[i] = '\0';
-            if (sscanf(data, "%7s %255s %15s",
-                       req->method,
-                       req->path,
-                       req->version) != 3) {
+			size_t counter = 0;
+			char *p = data;
+			char *method = p;
+			while (*p != ' ') {
+				p++;
+				counter++;
+			}
+			if (counter > 7) {
 				req->valid = INVALID;
 				return -1;
-            }
-            data[i] = '\r';
+			}
+
+			*p++ = '\0';
+			counter = 0;
+
+			char *path = p;
+			while (*p != ' ') {
+				p++;
+				counter++;
+			}
+
+			if (counter > 255) {
+				req->valid = INVALID;
+				return -1;
+			}
+			*p++ = '\0';
+			counter = 0;
+
+			char* version = p;
+			while (*p != ' ') {
+				counter++;
+				p++;
+			}
+
+			if (counter > 15) {
+				req->valid = INVALID;
+				return -1;
+			}
+			*p++ = '\0';
+			strncpy(req->method, method, sizeof(req->method)-1);
+			strncpy(req->path, path, sizeof(req->path)-1);
+			strncpy(req->version, version, sizeof(req->version)-1);
             i += 2; 
             break;
         }
