@@ -34,7 +34,7 @@ void handle_request(http_request_t *req, connection_t *conn) {
 void handle_read(int epfd, connection_t *conn) {
 
     while (1) {
-		int avail = buffer_ensure_writable(&conn->in, 4096);
+		int avail = buffer_ensure_writable(&conn->in, 1024);
 		char * ptr = write_ptr(&conn->in);
 		
 
@@ -50,7 +50,6 @@ void handle_read(int epfd, connection_t *conn) {
 			produce(&conn->in, n);
         }
         else if (n == 0) {
-            // client closed connection
             conn->state = CONN_CLOSED;
             return;
         }

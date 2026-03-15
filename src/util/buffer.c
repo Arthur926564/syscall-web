@@ -1,5 +1,4 @@
 #include "util/buffer.h"
-#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,8 +6,8 @@
 
 void buffer_init(buffer_t *b) {
 	if (!b) return;
-	b->data = NULL;
-	b->cap = 0;
+	b->data = malloc(4096);
+	b->cap = 4096;
 	b->start = 0;
 	b->end = 0;
 }

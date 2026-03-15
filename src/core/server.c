@@ -4,6 +4,8 @@
 #include "os/fs.h"
 #include "static/static.h"
 
+#include <asm-generic/errno-base.h>
+#include <asm-generic/errno.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -40,8 +42,10 @@ static void accept_and_dispatch(int server_fd, worker_t *workers, int nworkers) 
 			if (errno == EINTR) {
 				continue;
 			}
+			if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+
 			perror("accept");
-			continue;
+			break;
 		}
 
 		os_set_nonblocking(client_fd);

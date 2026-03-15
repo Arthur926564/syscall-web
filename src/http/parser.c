@@ -66,7 +66,7 @@ int http_parse_request(buffer_t *in, http_request_t *req) {
 			counter = 0;
 
 			char* version = p;
-			while (*p != ' ') {
+			while (*p != ' ' && (*p != '\r' && *(p+ 1) != '\n')) {
 				counter++;
 				p++;
 			}
@@ -142,8 +142,16 @@ int is_static_request(http_request_t *req) {
 
 bool keep_alive(http_request_t *req) {
 	const char *connection_header = get_header(req, "Connection");
-	if (connection_header && strcasecmp(connection_header, "keep-alive") == 0) {
-		return true;
+	if (strcmp(req->version, "HTTTP/1.1") == 0) {
+		if (connection_header && strcasecmp(connection_header, "close") == 0) {
+			return false;
+		} else {
+			return true;
+		}
+	} else {
+		if (connection_header && strcasecmp(connection_header, "keep-alive") == 0) {
+			return true;
+		}
 	}
 	return false;
 }
