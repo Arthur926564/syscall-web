@@ -26,30 +26,46 @@ void http_response_write_404(buffer_t *out) {
 }
 
 
+static int u64toa(char *buf, long v) {
+	if (v == 0) {
+		buf[0] = '0'; return  1;
+	}
+	char tmp[20];
+	int i = 0;
+	while (v > 0) {
+		tmp[i++] = '0' + (v % 10);
+		v /= 10;
+	}
+	for (int j = 0; j  < i; j++) {
+		buf[j] = tmp[i - 1- j];
+	}
+	return i;
+}
+
+
 void http_response_write_file(buffer_t *out,
                               long size,
                               const char *content_type,
                               connection_t *conn) {
-    char header[512];
-    int header_len;
+	static const char prefix[] = 
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Length: ";
 
-    header_len = snprintf(
-        header,
-        sizeof(header),
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Length: %ld\r\n"
-        "Content-Type: %s\r\n"
-        "Connection: %s\r\n"
-        "\r\n",
-        size,
-        content_type,
-        conn->keep_alive ? "keep-alive" : "close"
-    );
+	static const char ka_ct[] = "\r\nConnection: keep-alive\r\n\r\n";
+	static const char cl_ct[] = "\r\nConnection:  close\r\n\r\n";
 
-    if (header_len < 0 || header_len >= (int)sizeof(header)) {
-        conn->state = CONN_CLOSED;
-        return;
-    }
+	char len_str[20];
+	int len_digits = u64toa(len_str, size);
 
-    buffer_append(out, header, (size_t)header_len);
+	static const char ct_prefix[] = "\r\nContent-Type: ";
+
+
+	const char* suffix = conn->keep_alive ? ka_ct : cl_ct;
+	size_t suffix_len = conn->keep_alive ?  sizeof(ka_ct) - 1: sizeof(cl_ct) - 1;
+
+	buffer_append(out, prefix, sizeof(prefix) - 1);
+	buffer_append(out, len_str, len_digits);
+	buffer_append(out, ct_prefix, sizeof(ct_prefix) - 1);
+	buffer_append(out, content_type, strlen(content_type));
+	buffer_append(out, suffix, suffix_len);
 }
