@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <string.h>
 #include "core/server.h"
 #include "core/worker.h"
 #include "net/tcp.h"
@@ -61,6 +62,7 @@ static void accept_and_dispatch(int server_fd, worker_t *workers, int nworkers) 
 
 void server_loop(int server_fd) {
 	worker_t workers[NWORKERS];
+	memset(workers, 0, sizeof(workers));
 
 	for (int i = 0; i < NWORKERS; i++) {
 		if (worker_init(&workers[i]) == -1) {

@@ -76,7 +76,7 @@ static void worker_drain_pending(worker_t *w) {
     for (size_t i = 0; i < local_count; i++) {
         int client_fd = local_fds[i];
 
-        connection_t *conn = calloc(1, sizeof(connection_t));
+        connection_t *conn = conn_pool_get(&w->pool);
         if (!conn) {
             perror("calloc");
             close(client_fd);
@@ -84,8 +84,6 @@ static void worker_drain_pending(worker_t *w) {
         }
 
         conn->fd = client_fd;
-        buffer_init(&conn->in);
-        buffer_init(&conn->out);
         conn->state = CONN_READING_HEADERS;
 
         struct epoll_event ev;
@@ -96,7 +94,7 @@ static void worker_drain_pending(worker_t *w) {
         if (epoll_ctl(w->epfd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
             perror("epoll_ctl ADD client");
             close(client_fd);
-            free(conn);
+			conn_pool_put(&w->pool, conn);
             continue;
         }
     }
@@ -120,7 +118,7 @@ static void *worker_loop(void *arg) {
             if (events[i].data.ptr == NULL) {
                 worker_drain_pending(w);
             } else {
-                process_connection_event(w->epfd, &events[i]);
+                process_connection_event(w->epfd, &events[i], &w->pool);
             }
         }
     }

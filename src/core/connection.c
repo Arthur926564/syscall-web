@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include "core/conn_pool.h"
 
 
 connection_t *connection_create(int fd) {
@@ -41,7 +42,7 @@ void destroy_connection(int epfd, connection_t *conn) {
 	free(conn);
 }
 
-void process_connection_event(int epfd, struct epoll_event *ev) {
+void process_connection_event(int epfd, struct epoll_event *ev, conn_pool_t *pool) {
 	connection_t *conn = ev->data.ptr;
 	if (ev->events & (EPOLLERR | EPOLLHUP)) {
 		conn->state = CONN_CLOSED;
@@ -56,7 +57,9 @@ void process_connection_event(int epfd, struct epoll_event *ev) {
 	}
 
 	if (conn->state == CONN_CLOSED) {
-		destroy_connection(epfd, conn);
+		epoll_ctl(epfd, EPOLL_CTL_DEL, conn->fd, NULL);
+		close(conn->fd);
+		conn_pool_put(pool, conn);
 	}
 }
 

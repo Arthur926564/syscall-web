@@ -2,6 +2,7 @@
 #define CORE_CONNECTION_H
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <sys/epoll.h>
 #include "http/parser.h"
 #include "util/buffer.h"
@@ -14,7 +15,7 @@ typedef enum {
 } conn_state_t;
 
 
-typedef struct {
+typedef struct connection {
 	int fd;
 	buffer_t in;
 	buffer_t out;
@@ -36,6 +37,7 @@ void destroy_connection(int epfd, connection_t *conn);
 
 void connection_destroy(connection_t *connection);
 
-void process_connection_event(int epfd, struct epoll_event *ev);
+typedef struct conn_pool conn_pool_t;
 
+void process_connection_event(int epfd, struct epoll_event *ev, conn_pool_t *pool);
 #endif
