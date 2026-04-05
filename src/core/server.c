@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "core/server.h"
 #include "core/worker.h"
 #include "net/tcp.h"
@@ -37,14 +38,14 @@ static void accept_and_dispatch(int server_fd, worker_t *workers, int nworkers) 
 		struct sockaddr client_addr;
 		socklen_t addrlen = sizeof(client_addr);
 
-		int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
+		int client_fd = accept4(server_fd, (struct sockaddr *)&client_addr, &addrlen, SOCK_NONBLOCK);
 		if (client_fd == -1) {
 			if (errno == EINTR) {
 				continue;
 			}
 			if (errno == EAGAIN || errno == EWOULDBLOCK) break;
 
-			perror("accept");
+			perror("accept4");
 			break;
 		}
 
