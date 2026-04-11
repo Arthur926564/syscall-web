@@ -18,7 +18,7 @@ Requires:
 - POSIX environment
 
 Compile everything with
-```gcc -pthread src/**/*.c -Iinclude -lmagic -o my_server  ```
+```gcc -O2 -g -fno-omit-frame-pointer -pthread src/**/*.c -Iinclude -lmagic -o my_server  ```
 
 By default the server listens on `http://localhost:8080`
 
