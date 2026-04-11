@@ -5,6 +5,8 @@
 #include "static/static.h"
 #include "http/parser.h"
 #include "http/http_response.h"
+#include <netinet/in.h>
+#include <linux/tcp.h>
 #include <asm-generic/errno-base.h>
 #include <asm-generic/errno.h>
 #include <errno.h>
@@ -147,6 +149,8 @@ void handle_write(int epfd, connection_t *conn) {
 	}
 
 	if (conn->sending_file) {
+		int cork = 1;
+		setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
 		while (conn->file_offset < conn->file_size) {
 			ssize_t n = sendfile(
 					conn->fd,
@@ -174,6 +178,11 @@ void handle_write(int epfd, connection_t *conn) {
 				break;
 			}
 		}
+
+		cork = 0;
+		setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+
+
 		if (conn->file_offset >= conn->file_size) {
 			close(conn->file_fd);
 			conn->file_fd = -1;
