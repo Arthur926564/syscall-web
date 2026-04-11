@@ -1,10 +1,12 @@
 #include "core/worker.h"
+#include "core/conn_pool.h"
 #include "core/server.h"
 #include "core/connection.h"
 #include "net/tcp.h"
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/eventfd.h>
 #include <sys/epoll.h>
@@ -34,6 +36,8 @@
 static void *worker_loop(void *arg);
 
 
+
+
 static void worker_accept(worker_t *w) {
     while (1) {
         struct sockaddr client_addr;
@@ -52,10 +56,11 @@ static void worker_accept(worker_t *w) {
         conn->state = CONN_READING_HEADERS;
 
         struct epoll_event ev = {
-            .events   = EPOLLIN | EPOLLET | EPOLLRDHUP,
+            .events   = EPOLLIN | EPOLLET | EPOLLONESHOT| EPOLLRDHUP,
             .data.ptr = conn,
         };
         if (epoll_ctl(w->epfd, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
+			perror("epoll_ctl_add");
             close(client_fd);
             conn_pool_put(&w->pool, conn);
         }

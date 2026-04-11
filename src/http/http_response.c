@@ -68,4 +68,5 @@ void http_response_write_file(buffer_t *out,
 	buffer_append(out, ct_prefix, sizeof(ct_prefix) - 1);
 	buffer_append(out, content_type, strlen(content_type));
 	buffer_append(out, suffix, suffix_len);
+	
 }

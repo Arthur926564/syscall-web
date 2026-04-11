@@ -29,6 +29,7 @@ void static_serve(http_request_t *req, connection_t *conn) {
 	if (conn->file_fd < 0) {
 		conn->sending_file = false;
 		http_response_write_404(&conn->out);
+		return;
 	}
 
     conn->file_offset = 0;

@@ -69,6 +69,9 @@ void handle_read(int epfd, connection_t *conn) {
 
     // Try parsing after reading
     int consumed = http_parse_request(&conn->in, &conn->req);
+	fprintf(stderr, "parse result: %d valid: %d data: %.*s\n", 
+        consumed, conn->req.valid, 
+        (int)buffer_len(&conn->in), read_ptr(&conn->in));
 
     if (consumed < 0) {
         http_response_write_404(&conn->out);
@@ -93,20 +96,29 @@ void handle_read(int epfd, connection_t *conn) {
 
 	
     buffer_consume(&conn->in, consumed);
+	fprintf(stderr, "serving path: %s is_static: %d\n", 
+        conn->req.path, is_static_request(&conn->req));
 
     if (is_static_request(&conn->req)) {
+		fprintf(stderr, "calling static_serve\n");
         static_serve(&conn->req, conn);
     } else {
+		fprintf(stderr, "writing 404\n");
         http_response_write_404(&conn->out);
     }
 
     conn->write_offset = 0;
 
     struct epoll_event ev;
-    ev.events = EPOLLOUT | EPOLLET;
+    ev.events = EPOLLIN | EPOLLET | EPOLLOUT;
     ev.data.ptr = conn;
 
-    epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
+    int r  = epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
+	if (r < 0) {
+		perror("epoll_ctl MODE EPOLLOUT");
+		r = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->fd, &ev);
+    	fprintf(stderr, "epoll_ctl ADD fallback ret=%d\n", r);
+	}
     conn->state = CONN_WRITING;
 }
 
@@ -170,7 +182,7 @@ void handle_write(int epfd, connection_t *conn) {
 				}
 				if (errno == EAGAIN || errno == EWOULDBLOCK) {
 					struct epoll_event ev;
-					ev.events = EPOLLOUT | EPOLLET;
+        			ev.events = EPOLLIN | EPOLLET;
 					ev.data.ptr = conn;
 					epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
 					return;

@@ -54,7 +54,7 @@ void process_connection_event(int epfd, struct epoll_event *ev, conn_pool_t *poo
 		handle_read(epfd, conn);
 	}
 	
-	if (conn->state != CONN_CLOSED && ev->events & EPOLLOUT) {
+	if (ev->events & EPOLLOUT) {
 		handle_write(epfd, conn);
 	}
 
