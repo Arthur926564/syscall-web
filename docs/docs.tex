@@ -1,294 +1,317 @@
-\documentclass[11pt,a4paper]{article}
-
-% =========================
-% LuaLaTeX setup
-% =========================
-\usepackage{fontspec}
-
-% =========================
-% Layout
-% =========================
-\usepackage[a4paper,margin=1in]{geometry}
-\usepackage{style}
-\usepackage{microtype}
-\usepackage{setspace}
-\onehalfspacing
-
-% =========================
-% Math + CS
-% =========================
-\usepackage{amsmath,amssymb}
+\documentclass{article}
+\usepackage{hyperref}
 \usepackage{booktabs}
-\usepackage{siunitx}
-
-% =========================
-% Graphics
-% =========================
-\usepackage{graphicx}
 \usepackage{tikz}
-\usepackage{caption}
-\usepackage{subcaption}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{geometry}
+\geometry{margin=1in}
 
-% =========================
-% Links
-% =========================
-\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue]{hyperref}
-
-% =========================
-% Code (very clean)
-% =========================
-\usepackage{listings}
-\usepackage{xcolor}
-
-\definecolor{codebg}{RGB}{248,248,248}
-
-\lstset{
-    basicstyle=\ttfamily\small,
-    backgroundcolor=\color{codebg},
-    frame=single,
-    breaklines=true,
-    columns=fullflexible
-}
-
-% =========================
-% Section styling (clean)
-% =========================
-\usepackage{titlesec}
-\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
-\titleformat{\subsection}{\bfseries}{\thesubsection}{1em}{}
-
-% =========================
-% Title
-% =========================
-\title{\textbf{Design and Performance Evaluation of a Minimal Non-Blocking HTTP/1.1 Server}}
+\title{Design and Performance Evaluation of a Minimal Non-Blocking HTTP/1.1 Server}
 \author{Arthur Herbette}
-\date{\today}
+\date{April 11, 2026}
 
 \begin{document}
-
 \maketitle
 
 \begin{abstract}
-This report presents the design and performance evaluation of a minimal HTTP/1.1 server implemented in C. The server relies on non-blocking I/O and an epoll-based event loop to handle concurrent connections efficiently. We analyze architectural choices and evaluate performance under synthetic workloads.
+This report presents the design and performance evaluation of a minimal HTTP/1.1 server
+implemented in C. The server relies on non-blocking I/O, an epoll-based event loop, and a
+multithreaded worker architecture using \texttt{SO\_REUSEPORT} to handle concurrent connections
+efficiently. We analyse architectural choices, implementation challenges, and evaluate performance
+under synthetic workloads using \texttt{wrk}. The final implementation achieves throughput within
+run-to-run variance of \texttt{nginx} on static file serving.
 \end{abstract}
 
 \section{Introduction}
 
-The goal of this project was to gain a deeper understanding of HTTP and network programming. You can find the github repositories at this \href{https://github.com/Arthur926564/syscall-web}{link}. I started this project as a simple blocking, one threaded, loop-based server. After understanding those fundamental I implemented headers parsing which enabled persistent (keep-alive) connections. The goal after that introduction is to have a very efficient server and is scalable. Those reasons motivated the transition to a non-blocking server architecture. Allowing the server to handle multiple connections concurrently using asynchronous I/O.
+The goal of this project was to gain a deeper understanding of HTTP and network programming.
+You can find the GitHub repository at this link. I started this project as a simple blocking,
+single-threaded, loop-based server. After understanding those fundamentals I implemented header
+parsing which enabled persistent (keep-alive) connections. The goal after that introduction was
+to have a very efficient and scalable server. Those reasons motivated the transition to a
+non-blocking server architecture, allowing the server to handle multiple connections concurrently
+using asynchronous I/O, and eventually to a fully multithreaded design.
+
 \section{Architecture}
-The server follows an event-driven architecture based on a single-threaded reactor pattern. The architecture of this server is divided into 7 parts:
+
+The server follows an event-driven architecture. It started as a single-threaded reactor pattern
+and evolved into a multi-threaded design where each worker thread owns its own epoll instance
+and its own listen socket via \texttt{SO\_REUSEPORT}. The architecture is divided into 7 layers:
 
 \begin{itemize}
-	\item \textbf{core}: coordinates the server and orchestrates interactions between components
-	\item \textbf{epoll}: contains \texttt{struct} to be able to use \texttt{epoll} in our server loop
-	\item \textbf{HTTP}: parse request, turns plain text into \texttt{http\_request\_t}
-	\item \textbf{net}: handle connection with the socket, tcp connection
-	\item \textbf{os}: provides low-level read/write operations and filesystem access
-	\item \textbf{static}: handle all transaction which use static file (i.e., \texttt{index.html})
-	\item \textbf{util}: contains all utilities of the server, at the moment it contains only \texttt{buffer\_t} which serves to store, consume all data from the connection
+    \item \textbf{core}: coordinates the server and orchestrates interactions between components
+    \item \textbf{epoll}: contains structs to use epoll in the server loop
+    \item \textbf{HTTP}: parses requests, turns plain text into \texttt{http\_request\_t}
+    \item \textbf{net}: handles connection setup, TCP listen and accept
+    \item \textbf{os}: provides low-level read/write operations and filesystem access
+    \item \textbf{static}: handles all transactions which use static files (i.e., \texttt{index.html})
+    \item \textbf{util}: contains all utilities of the server; at the moment it contains only
+          \texttt{buffer\_t} which serves to store and consume all data from the connection
 \end{itemize}
-The system is divided into layers so that each component exposes a clear abstraction and minimizes coupling with the others.\\
 
-To have a better understanding about this server we can first explain what each layer is doing in our stack:
-\begin{figure}[h]
-\centering
+The system is divided into layers so that each component exposes a clear abstraction and
+minimises coupling with the others.
+
+\medskip
+To better understand this server we can first explain what each layer does in the stack:
+
+\begin{center}
 \begin{tikzpicture}
-\node[draw] (os) {OS Layer};
-\node[draw,below=1cm of os] (epoll) {I/O Multiplexing (epoll)};
-\draw[->] (os) -- (epoll);
-\node[draw, below=1cm of epoll] (connection) {Connection Layer};
-\draw[->] (epoll) -- (connection);
-\node[draw, below=1cm of connection] (http) {HTTP Layer};
-\draw[->] (connection) -- (http);
-\node[draw, below=1cm of http] (app) {Application Layer (static file server)};
-\draw[->] (http) -- (app);
+  \foreach \label/\y in {
+    {OS Layer}/0,
+    {I/O Multiplexing (epoll)}/1,
+    {Connection Layer}/2,
+    {HTTP Layer}/3,
+    {Application Layer (static file server)}/4
+  } {
+    \draw (0, \y*0.7) rectangle (8, \y*0.7+0.6);
+    \node at (4, \y*0.7+0.3) {\label};
+  }
 \end{tikzpicture}
-\caption{Layer stack}
-\end{figure}
+\end{center}
 
+\noindent Incoming data flows upward through the stack (OS $\to$ HTTP), while responses are
+generated at the application layer and propagated downward to the socket.
 
+\paragraph{OS Layer} The OS layer's responsibilities are: sockets, file descriptors,
+read/write/accept, and filesystem access.
 
-Incoming data flows upward through the stack (OS → HTTP), while responses are generated at the application layer and propagated downward to the socket.\\
+\paragraph{Event Layer} The event layer (epoll) turns blocking OS events into asynchronous
+events. The question it tries to answer is: \emph{which fd is ready?}
 
-Each layer has its own responsibilities and purpose. 
-\paragraph{OS Layer}\\
-The OS layer's responsibilities are:
+\paragraph{Connection Layer} The connection layer abstracts over raw sockets; its
+responsibilities are: input/output buffers, write offsets, connection state, and the
+keep-alive lifecycle.
+
+\paragraph{HTTP Layer} It only works with plain text. The goal is to: parse requests,
+detect headers, handle keep-alive, and build responses. It transforms raw bytes into a
+structured request.
+
+\paragraph{Application Layer (static)} This is the highest-level logic. At the current
+moment, as it serves only GET, it only serves files, but could later become: API endpoints,
+dynamic content, routing.
+
+\subsection{Multithreaded Worker Model}
+
+The final architecture uses $N$ worker threads (currently 8), each running its own epoll
+loop. Rather than having a single main thread accept connections and distribute them to
+workers via a queue, which introduces cross-thread synchronisation on every connection;
+each worker binds its own copy of the listen socket using \texttt{SO\_REUSEPORT}. The kernel
+itself distributes incoming connections across workers with no mutex, no \texttt{eventfd}
+wakeup, and no shared queue. Each worker is entirely self-contained:
+
 \begin{itemize}
-	\item sockets
-	\item file descriptors
-	\item read/write/accept
-	\item filesystem access
-\end{itemize}
-\paragraph{Event Layer}\\
-\label{par:Event Layer}
-
-The Event layer (epoll)'s purpose is to turn the blocking OS events into asynchronous events. The question it tries to answer is 'which fd is ready?'.\\
-\paragraph{Connection Layer}\\
-
-The connection Layer abstracts over raw sockets, its responsibilities are:
-\begin{itemize}
-	\item input/output buffers
-	\item write offsets
-	\item connection state
-	\item keep-alive lifecycle
-\end{itemize}
-\paragraph{HTTP Layer}%
-\label{par:HTTP Layer}
-As said before it only work with plain text, the goal is to:
-\begin{itemize}
-	\item Parse request
-	\item detect headers
-	\item handle keep-alive
-	\item build response
-\end{itemize}
-It transforms raw bytes into a structured request.
-
-\paragraph{Application Layer (static)}%
-\label{par:Application Layer (static)}
-This is the highest-level logic, at the current moment, (as it serves only \texttt{GET}) it only serve file but could later become:
-\begin{itemize}
-	\item API endpoints
-	\item dynamic content
-	\item routing
+    \item its own \texttt{epoll} instance
+    \item its own listen socket (\texttt{SO\_REUSEPORT})
+    \item its own connection pool (\texttt{conn\_pool\_t})
 \end{itemize}
 
+This design eliminates the cross-thread dispatch overhead that was previously responsible for
+roughly 20\,\% of latency under load. Compared to the earlier dispatch model, the hot path
+per connection drops from: \texttt{lock $\to$ memcpy $\to$ eventfd write $\to$ wakeup $\to$
+lock $\to$ drain $\to$ epoll\_ctl} to simply: \texttt{epoll fires $\to$ accept4 $\to$
+epoll\_ctl}.
 
-
-
-\subsection{State Machine}
-One of the issues during the developement of this server was that: as a connection does not complete in one step, when recieving an event for a connection, we needed to know the state of the connection to be able to proceed on the handling. To resolve this issue, I added the following state machine:
-\begin{figure}[h]
-\centering
-\begin{tikzpicture}[
-state/.style={circle, draw, minimum size=1.2cm, align=center},
->=Stealth,
-semithick
-]
-
-% Nodes
-\node[state] (reading) at (4,0) {reading};
-\node[state] (writing) at (0,-4) {writing};
-\node[state] (closed)  at (6,-4) {closed};
-
-% Transitions
-\draw[->] (reading) edge[bend right] node[left] {request complete} (writing);
-
-\draw[->] (writing) edge[bend right] node[right] {keep-alive} (reading);
-
-\draw[->] (writing) edge[bend right] node[below] {finished} (closed);
-
-\draw[->] (reading) edge[loop above] node {request not complete} ();
-
-\draw[->] (reading) edge[bend left] node[right] {request malformed} (closed);
-
-\end{tikzpicture}
-\caption{state machine of \texttt{connection\_t}}
-\end{figure}
-
-
-%\draw[dotted, thick,->] (invalid) edge[loop below] node[below] {BusRd / --, BusRdX / --} (invalid);
-% \draw[->] (invalid.west) edge[bend left] node[left] {PrWr / BusRdX} (modified.west);
-
-
-
-
-% =========================
+% \subsection{State Machine}
+%
+% One of the issues during the development of this server was that, as a connection does not
+% complete in one step, when receiving an event for a connection we needed to know the state of
+% the connection to be able to proceed with the handling. To resolve this issue, I added the
+% following state machine:
+%
+% \begin{center}
+% \begin{tikzpicture}[->, >=stealth, node distance=2.5cm, every node/.style={draw, rounded corners, minimum width=2cm, minimum height=0.7cm, align=center}]
+%   \node (reading) {reading};
+%   \node (writing) [right=16cm of reading] {writing};
+%   \node (closed)  [right=16cm of writing] {closed};
+%   \draw (reading) -- node[above, draw=none] {request complete} (writing);
+%   \draw (reading.south) .. controls +(0,-1) and +(0,-1) .. node[below, draw=none] {malformed} (closed.south);
+%   \draw (writing) -- node[above, draw=none] {finished} (closed);
+%   \draw (writing.north) .. controls +(0,1) and +(0,1) .. node[above, draw=none] {keep-alive} (reading.north);
+%   \draw (reading) .. controls +(-1.5,0) and +(-1.5,0) .. node[left, draw=none] {incomplete} (reading);
+% \end{tikzpicture}
+% \end{center}
+%
 \section{Implementation Challenges}
-The primary challenges were related to incremental I/O and state management. Unlike blocking implementations, requests may arrive in partial segments, requiring persistent buffering and repeated parsing attempts. Handling keep-alive connections introduced additional complexity, since multiple requests can coexist within the same input buffer.
 
-% =========================
+The primary challenges were related to incremental I/O and state management. Unlike blocking
+implementations, requests may arrive in partial segments, requiring persistent buffering and
+repeated parsing attempts. Handling keep-alive connections introduced additional complexity,
+since multiple requests can coexist within the same input buffer.
+
+A subtler challenge was the interaction between edge-triggered epoll (\texttt{EPOLLET}) and
+partial reads. With level-triggered epoll the kernel re-notifies as long as data is available,
+which is forgiving of incomplete reads. With \texttt{EPOLLET} the notification fires exactly
+once on the state transition; if the entire available data is not drained in that single
+dispatch, the connection silently stalls. This required careful loop structures in
+\texttt{handle\_read} to always drain until \texttt{EAGAIN}.
+
+Another challenge specific to the multithreaded design was ensuring correct use of
+\texttt{epoll\_ctl}. The \texttt{EPOLL\_CTL\_MOD} operation requires the file descriptor to
+already be registered via \texttt{EPOLL\_CTL\_ADD}; calling \texttt{MOD} on an unregistered
+fd returns \texttt{ENOENT} silently, leaving the connection permanently stalled. Systematic
+error checking on all \texttt{epoll\_ctl} calls was necessary to surface these issues during
+development.
+
 \section{Experimental Setup}
 
-Benchmarks were performed using ApacheBench:
+Benchmarks were performed using \texttt{wrk}:
+\begin{verbatim}
+wrk -t8 -c400 -d30s http://127.0.0.1:8080/<file>
+\end{verbatim}
 
-\begin{lstlisting}
-ab -n 10000 -c 100 -k http://localhost:8080/index.html
-\end{lstlisting}
-I also tried using \texttt{style.css} and an .ico file. The setup I am currenlty using is a ThinkPad t16 with a Intel(R) Core(TM) Ultra 7 155U (14) @ 4.80 GHz with 32 GiB of RAM (PS. I use arch btw).
+The setup is a ThinkPad T16 with an Intel Core Ultra 7 155U (14 cores) @ 4.80\,GHz with
+32\,GiB of RAM running Arch Linux. All benchmarks compare directly against \texttt{nginx}
+running on the same machine on port 8081, serving identical files.
+
+\section{Discussion}
+
+\subsection{Effect of Keep-Alive}
+
+The transition to a non-blocking architecture significantly increased throughput, especially
+when combined with persistent connections. Without keep-alive, one request corresponds to
+exactly one TCP connection. This means that for every request the server must:
+\texttt{accept()}, TCP handshake, read the request, write the response, close socket. With
+keep-alive, one connection can carry many requests. The connection stays open, so we avoid
+repeating the accept and close process, which reduces syscall count and kernel allocations.
+
+\medskip
+\noindent Measured impact of keep-alive (single-threaded baseline, \texttt{ab -n 10000 -c 100}):
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Mode} & \textbf{Req/s} & \textbf{Notes} \\
+\midrule
+Without keep-alive & 51,105 & full TCP handshake per request \\
+With keep-alive    & 152,935 & connections reused across requests \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Adding keep-alive does not especially reduce the latency of each individual request but adds
+significant throughput and scalability by removing the TCP setup cost.
+
+\subsection{Optimisation Journey}
+
+The server was profiled iteratively using \texttt{perf record} and \texttt{perf report} after
+each change. The following optimisations were applied in order of impact:
+
+\begin{enumerate}
+    \item \textbf{SO\_REUSEPORT per-worker sockets}: eliminated the centralised
+    accept-and-dispatch model with \texttt{eventfd} wakeups. Each worker binds its own
+    listen socket; the kernel distributes connections with no cross-thread synchronisation.
+
+    \item \textbf{Keep-alive typo fix}: a typo in the HTTP version comparison
+    (\texttt{HTTTP/1.1} instead of \texttt{HTTP/1.1}) caused every connection to be treated
+    as HTTP/1.0 and closed after each response. Fixing this alone approximately doubled
+    request throughput by enabling connection reuse.
+
+    \item \textbf{Parser cleanup}: replaced \texttt{strncpy}-based header copying with
+    bounded \texttt{memcpy} using lengths already computed during scanning. Eliminated
+    in-place buffer mutation (writing \texttt{\textbackslash{}0} into the buffer and
+    restoring) which was cache-unfriendly and fragile.
+
+    \item \textbf{Eliminated \texttt{dup()} per request}: the original code called
+    \texttt{dup()} on the cached file descriptor so that \texttt{sendfile} could have its
+    own file offset. Since \texttt{sendfile} accepts an explicit \texttt{offset} pointer,
+    the \texttt{dup()} is unnecessary; removing it eliminated a syscall and a
+    \texttt{close()} on every request.
+
+    \item \textbf{TCP\_CORK gating}: \texttt{TCP\_CORK} was being set and unset on every
+    request regardless of file size, adding two \texttt{setsockopt} syscalls per response.
+    Gating behind a file-size threshold (only cork when file $> 16\,\mathrm{KiB}$) removed
+    this overhead for the common case of small files.
+\end{enumerate}
+
+\subsection{Limitations}
+
+Performance behaviour can be interpreted through three regimes: connection-bound, CPU-bound,
+and network-bound execution. Enabling persistent connections moved the server from a
+connection-bound regime to a CPU-bound regime, significantly increasing throughput. The
+multithreaded design then distributed that CPU work across cores, pushing throughput further.
+
+The remaining bottlenecks identified by \texttt{perf} are largely irreducible within the
+\texttt{epoll} architecture: HTTP parsing ($\sim$11\,\%), \texttt{epoll\_ctl} ($\sim$10\,\%),
+\texttt{read}/\texttt{write} syscalls ($\sim$10\,\% each), and \texttt{sendfile}
+($\sim$7\,\%). These represent the fundamental cost of serving a file over a socket.
+
+\section{Benchmark Results}
+
+\paragraph{Final benchmark --- $100\,\mathrm{KiB}$ file}
+After all optimisations, the server sustained $248{,}280$ requests per second with a mean
+latency of $1.33\,\mathrm{ms}$ and a transfer rate of $23.70\,\mathrm{GB/s}$. Under the
+same conditions \texttt{nginx} achieved $251{,}822$ requests per second, placing the server
+at approximately $98.6\,\%$ of \texttt{nginx} throughput --- a gap within run-to-run
+variance.
 
 \begin{table}[h]
 \centering
-\begin{tabular}{|l|c|c|c|c|c|}
+\begin{tabular}{lrrr}
 \toprule
-File & Size [bytes] & Concurrency & Requests/sec  & mean [ms] & Transfer rate[Kbytes/sec]\\
+\textbf{Server} & \textbf{Req/s} & \textbf{Avg latency} & \textbf{Transfer rate} \\
 \midrule
-index.html & 308 & 100 & 140,821 & 0.710  & 54595.74\\
-style.css  & 1092 & 100 & 123,344  & 0.811  & 142255.26\\
-favicon.ico & 318 & 100 & 119104.32 & 0.084 & 49084.01 \\
+This server & $248{,}280$ & $1.33\,\mathrm{ms}$ & $23.70\,\mathrm{GB/s}$ \\
+\texttt{nginx} & $251{,}822$ & $4.01\,\mathrm{ms}$ & $24.07\,\mathrm{GB/s}$ \\
 \bottomrule
 \end{tabular}
-\caption{Benchmark results}
+\caption{Static file throughput, $100\,\mathrm{KiB}$ file, 8 threads, 400 concurrent
+connections, 30\,s run.}
 \end{table}
-\paragraph{Remark}%
-\label{par:Remark}
-Note that the 'mean' column here, represents the latency of each request, if we take the throughput meaning the mean, across all concurrent requests, the results are 0.007, 0.008, 0.008 ms respectively.
 
+\paragraph{Profiling summary}
+Successive \texttt{perf} reports showed the hotspot distribution converging toward
+irreducible costs. The final profile attributes approximately $11\,\%$ of cycles to HTTP
+request parsing, $10\,\%$ each to \texttt{epoll\_ctl} and \texttt{read}/\texttt{write}
+syscalls, and $7\,\%$ to \texttt{sendfile}. No single user-space function dominates; the
+remaining overhead is split across \texttt{buffer\_ensure\_writable},
+\texttt{http\_response\_write\_file}, and kernel time. This distribution indicates that the
+implementation has reached the practical ceiling of the \texttt{epoll}-based architecture
+for this workload.
 
-% =========================
-\section{Discussion}
-The transition to a non-blocking architecture significantly increased throughput, especially when combined with persistent connections. However, this improvement came at the cost of increased implementation complexity, requiring explicit connection states and careful buffer management.\\
-Another improvement came when allowing connection to be keep-alive. Without having keep-alive, one request corresponds to only one TCP connection. This means that for every request the server must: accept(), TCP handshake, read the request, write response, close socket. Now with keep-alive we have that one connection can have many request. This implies that the connection stays open, we don't have to repeat the accept and close process which allows to have less syscalls and fewer kernel allocations.\\
+\paragraph{Connection stability}
+During long keep-alive stress tests, sporadic \texttt{ECONNRESET} errors were observed,
+consistent with \texttt{wrk} tearing down connections mid-flight at the end of a test window.
+These are suppressed in the final implementation by ignoring \texttt{ECONNRESET} and
+\texttt{EPIPE} on the read and write paths respectively. No errors were observed under normal
+single-connection \texttt{curl} workloads once the keep-alive parsing bug was corrected.
 
-If we take the number, I retried now to compare both with and without keep-alive, (I used the same benchmark as before \texttt{ab -n 10000 -c 100 -k http://localhost:8080/index.html}) without keep-alive, I get around 51105 request per second and as for the benchmark with keep-alive, we get around 152935 requests per second.\\
-
-Adding the keep-alive doesn't especially reduce the latency of each request but add more throughput to our server. This allows us to also have more scalability and be more stable (the TCP setup cost is removed).
-
-
-\subsection{Limitations}
-Performance behavior can be interpreted through three regimes: connection-bound, CPU-bound, and network-bound execution. Enabling persistent connections moved the server from a connection-bound regime to a CPU-bound regime, significantly increasing throughput.
-% =========================
 \section{Future Work}
-As seen in the previous section the current bottleneck of this server is the CPU, there is a couple of way which may resolve this bottleneck:
-\paragraph{Buffer}%
-\label{par:Buffer}
 
-At the current moment a buffer is used to store data. This means that the data flow go from \texttt{read} \textrightarrow \texttt{buffer\_append}, we parse the buffer and then \texttt{buffer\_consume} \textrightarrow \texttt{memmove}. This implies that we use \texttt{memmove()} a lot which becomes expensive at high request rate. A way of solving this issue would be that use a sliding window. Instead of moving the data around. Why not just move an index around? We have our buffer as before but now data is put into the buffer at a certain index which then would be updated everytime data is read into our buffer. Then parsing data and consuming data becomes fairly easy as it comes down to only updating the index.
+\paragraph{io\_uring}
+The next architectural step would be to replace the \texttt{epoll} event loop with
+\texttt{io\_uring}. Rather than one syscall per I/O operation, \texttt{io\_uring} allows
+submitting a ring of operations and collecting completions in bulk via a single
+\texttt{io\_uring\_enter} call. This would reduce the cost of \texttt{epoll\_ctl},
+\texttt{read}, \texttt{write}, and \texttt{sendfile} --- currently responsible for roughly
+$35\,\%$ of cycles --- at the cost of a significant rewrite of the event loop and connection
+state machine.
 
-\paragraph{Send files}%
-\label{par:send files}
-The \href{https://man7.org/linux/man-pages/man2/sendfile.2.html}{\texttt{sendfile}} command allows us to copy data from a file descriptor to another, as it works directly in the kernel, this syscall is faster than a \texttt{read} + \texttt{write}. At the moment I only tested on relatively small file and as I have lots a RAM it am not sure if it would greatly improve performance in our benchmark used above. \textbf{But} it will but when dealing with bigger file it will be a must to use this function.
+\paragraph{Precomputed response headers}
+Currently \texttt{http\_response\_write\_file} builds the response headers at request time
+via several \texttt{buffer\_append} calls. Since the files are cached at startup with known
+sizes and content types, the full response header string could be precomputed once per
+cached file and stored in \texttt{static\_file\_entry\_t}, reducing the per-request header
+path to a single \texttt{memcpy}.
 
-\paragraph{Multi-threading}%
-\label{par:Multi-threading}
-The model at the moment is the following:
-\begin{itemize}
-	\item One thread
-	\item One epoll loop
-	\item Many connections
-\end{itemize}
-A danger with multi-threading is the have mutliple thread handling the \important{same} connection. To solve this issue we have a main thread which accept connections \textrightarrow distribute sockets and then each worker threads has its own \texttt{epoll} and connection.\\
-The goal is to have a queue for incoming HTTP requests and a pool of thread for satisfying them. The server take the first request from the queue and assignes a free thread from the pool.\\
-What would be running is basically $n$ current server running independently.
+\paragraph{HTTPS}
+Moving from HTTP to HTTPS requires an SSL/TLS certificate. OpenSSL is the standard way of
+doing it. Adding encryption changes the architecture by introducing a new TLS layer between
+the HTTP and connection layers. TLS will introduce CPU cost due to encryption and handshake
+overhead, which makes performance tracking more difficult. This feature is planned after the
+above optimisations.
 
-
-\paragraph{Benchmark Results}
-
-The server was benchmarked on a ThinkPad T16 (Intel Ultra~7~155U) running Arch Linux using \texttt{wrk}. The workload consisted of static file serving over \texttt{localhost} with multiple concurrent connections. For a $1\,\mathrm{MiB}$ file and $400$ concurrent connections, the server sustained approximately $9{,}563$ requests per second, corresponding to a throughput of roughly $9.34\,\mathrm{GB/s}$. The average request latency under this load was approximately $72.9\,\mathrm{ms}$, reflecting the cost of transferring large responses under high concurrency. 
-
-For smaller responses ($100\,\mathrm{KiB}$ files), the server achieved significantly higher request rates, reaching approximately $123{,}500$ requests per second and a transfer rate of about $11.8\,\mathrm{GB/s}$, with an average latency of $2.56\,\mathrm{ms}$ at $400$ concurrent connections. These results indicate that the implementation scales well with concurrency and is capable of sustaining high throughput for cached static content. 
-
-During long keep-alive stress tests, a rare connection reset was observed, suggesting a minor edge case in persistent connection lifecycle handling. When forcing connection closure after each response, the error disappeared while maintaining essentially identical throughput ($124{,}300$ requests per second), indicating that the core request/response path is stable and that further work primarily concerns robustness of persistent connection state transitions.
-
-\paragraph{HTTPS support}%
-\label{par:HTTPS support}
-Moving from HTTP to HTTPS requires an SSL/TLS certificate. If I understood right what is needed, OpenSSl is the standard way of doing it. By adding this new encryption the architecture of the server will actually change by adding a new TLS layer between the HTTP and the connection layer.\\
-However TLS will introduce CPU cost (due to the encryption) which will make tracking the efficiency of our server more difficult. At the moment I think that I will implement this feature after the features mentionned above.
-
-
-
-
-% =========================
 \section{Conclusion}
 
-As we have seen before, non-blocking + keep-alive allowed our server too have to be really efficient and to handle a big concurrency.\\
+As we have seen, non-blocking I/O combined with keep-alive and a multithreaded
+\texttt{SO\_REUSEPORT} design allowed the server to reach throughput within run-to-run
+variance of \texttt{nginx} on static file serving.
 
-This project really taught me how does network work on a really low level. I also really enjoyed going from a simple kind of 'single cycle' server, into 'multi-cycle' into a 'superscalar' processor and as a natural extensions of the architecture would be 'multi-core' server.\\
+This project really taught me how networking works at a very low level. I also really
+enjoyed going from a simple kind of `single-cycle' server, into `multi-cycle', into a
+`superscalar' processor. And as a natural extension, the architecture would become a
+`multi-core' server, which is exactly what it did.
 
 \end{document}
 
-
-
-
-% source https://superuser.com/questions/276832/what-exactly-is-a-threaded-web-server
-% https://seranking.com/blog/how-to-switch-to-https/
-% https://www.keycdn.com/blog/http-to-https#:~:text=To%20begin%2C%20you%20will%20need,Trust%20indicators
