@@ -150,12 +150,6 @@ void handle_write(int epfd, connection_t *conn) {
 	}
 
 	if (conn->sending_file) {
-		int cork = 1;
-		if (conn->file_size > 16384) {
-			setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
-		}
-
-
 		while (conn->file_offset < conn->file_size) {
 			ssize_t n = sendfile(
 					conn->fd,
@@ -187,11 +181,6 @@ void handle_write(int epfd, connection_t *conn) {
 				break;
 			}
 		}
-		if (conn->file_size > 16384) {
-			cork = 0;
-			setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
-		}
-
 
 		if (conn->file_offset >= conn->file_size) {
 			conn->file_fd = -1;
