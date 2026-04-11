@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,15 @@
 
 #define MAX_KEEP_CAP (64 * 1024)
 
+static inline void conn_rearm(int epfd, connection_t *conn, uint32_t events) {
+	struct epoll_event ev = {
+		.events = events | EPOLLET | EPOLLONESHOT | EPOLLRDHUP,
+		.data.ptr = conn,
+	};
+	epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
+}
+
+
 void handle_request(http_request_t *req, connection_t *conn) {
 	if (is_static_request(req)) {
 		static_serve(req, conn);
@@ -34,17 +44,16 @@ void handle_request(http_request_t *req, connection_t *conn) {
 }
 
 void handle_read(int epfd, connection_t *conn) {
+	int avail = buffer_ensure_writable(&conn->in, 8192);
+
+	if (avail < 0) {
+		perror("available error");
+		conn->state = CONN_CLOSED;
+		return;
+	}
 
     while (1) {
-		int avail = buffer_ensure_writable(&conn->in, 1024);
 		char * ptr = write_ptr(&conn->in);
-		
-
-		if (avail < 0) {
-			perror("available error");
-			conn->state = CONN_CLOSED;
-			return;
-		}
 
         ssize_t n = read(conn->fd, ptr, avail);
 
@@ -99,15 +108,7 @@ void handle_read(int epfd, connection_t *conn) {
 
     conn->write_offset = 0;
 
-    struct epoll_event ev;
-    ev.events = EPOLLIN | EPOLLET | EPOLLOUT;
-    ev.data.ptr = conn;
-
-    int r = epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
-	if (r < 0) {
-		perror("epoll_ctl MODE EPOLLOUT");
-		epoll_ctl(epfd, EPOLL_CTL_ADD, conn->fd, &ev);
-	}
+	conn_rearm(epfd, conn, EPOLLOUT);
     conn->state = CONN_WRITING;
 }
 
@@ -197,14 +198,8 @@ void handle_write(int epfd, connection_t *conn) {
         conn->state = CONN_READING_HEADERS;
 
         struct epoll_event ev;
-        ev.events = EPOLLIN | EPOLLET;
-        ev.data.ptr = conn;
+		conn_rearm(epfd, conn, EPOLLIN);
 
-        if (epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) == -1) {
-			perror("epoll_ctl MODE EPOLLIN");
-			conn->state = CONN_CLOSED;
-			return;
-		}
     }
     else {
         conn->state = CONN_CLOSED;

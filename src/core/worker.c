@@ -56,7 +56,7 @@ static void worker_accept(worker_t *w) {
         conn->state = CONN_READING_HEADERS;
 
         struct epoll_event ev = {
-            .events   = EPOLLIN | EPOLLET | EPOLLRDHUP,
+            .events   = EPOLLIN | EPOLLET | EPOLLONESHOT | EPOLLRDHUP,
             .data.ptr = conn,
         };
         if (epoll_ctl(w->epfd, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
