@@ -28,95 +28,77 @@ int find_header(char *line, http_header_t *header) {
 	return 0;
 }
 
-
 int http_parse_request(buffer_t *in, http_request_t *req) {
     char *data = read_ptr(in);
-    size_t len = buffer_len(in);
-    size_t i = 0;
+    size_t len  = buffer_len(in);
+    size_t i    = 0;
 
-    // Parse request line
-    for (; i + 1 < len; i++) {
-        if (data[i] == '\r' && data[i+1] == '\n') {
-			size_t counter = 0;
-			char *p = data;
-			char *method = p;
-			while (*p != ' ') {
-				p++;
-				counter++;
-			}
-			if (counter > 7) {
-				req->valid = INVALID;
-				return -1;
-			}
+    // --- request line: method ---
+    size_t start = i;
+    while (i < len && data[i] != ' ') i++;
+    if (i >= len) { req->valid = INCOMPLETE; return 0; }
+    if (i - start > sizeof(req->method) - 1) { req->valid = INVALID; return -1; }
+    memcpy(req->method, data + start, i - start);
+    req->method[i - start] = '\0';
+    i++;  // skip space
 
-			*p++ = '\0';
-			counter = 0;
+    // --- path ---
+    start = i;
+    while (i < len && data[i] != ' ') i++;
+    if (i >= len) { req->valid = INCOMPLETE; return 0; }
+    if (i - start > sizeof(req->path) - 1) { req->valid = INVALID; return -1; }
+    memcpy(req->path, data + start, i - start);
+    req->path[i - start] = '\0';
+    i++;  // skip space
 
-			char *path = p;
-			while (*p != ' ') {
-				p++;
-				counter++;
-			}
+    // --- version ---
+    start = i;
+    while (i + 1 < len && !(data[i] == '\r' && data[i+1] == '\n')) i++;
+    if (i + 1 >= len) { req->valid = INCOMPLETE; return 0; }
+    if (i - start > sizeof(req->version) - 1) { req->valid = INVALID; return -1; }
+    memcpy(req->version, data + start, i - start);
+    req->version[i - start] = '\0';
+    i += 2;  // skip \r\n
 
-			if (counter > 255) {
-				req->valid = INVALID;
-				return -1;
-			}
-			*p++ = '\0';
-			counter = 0;
-
-			char* version = p;
-			while (*p != ' ' && (*p != '\r' && *(p+ 1) != '\n')) {
-				counter++;
-				p++;
-			}
-
-			if (counter > 15) {
-				req->valid = INVALID;
-				return -1;
-			}
-			*p++ = '\0';
-			strncpy(req->method, method, sizeof(req->method)-1);
-			strncpy(req->path, path, sizeof(req->path)-1);
-			strncpy(req->version, version, sizeof(req->version)-1);
-            i += 2; 
-            break;
-        }
-    }
-
-    size_t consumed = i; 
+    // --- headers ---
     req->header_count = 0;
-
-    // Parse headers
     while (i + 1 < len) {
-        if (data[i - 2] == '\r' && data[i - 1] == '\n' &&
-            data[i] == '\r' && data[i+1] == '\n') {
-            consumed = i + 2; 
-            break;
+        // blank line = end of headers (\r\n on its own)
+        if (data[i] == '\r' && data[i+1] == '\n') {
+            req->valid = COMPLETE;
+            return (int)(i + 2);
         }
 
-        size_t line_start = i;
+        // find end of this header line
+        start = i;
         while (i + 1 < len && !(data[i] == '\r' && data[i+1] == '\n')) i++;
-        if (i + 1 >= len) { 
-			req->valid  = INCOMPLETE;
-			return -1;
-			break; 
-		}
+        if (i + 1 >= len) { req->valid = INCOMPLETE; return 0; }
 
-        char saved = data[i];
-        data[i] = '\0';
-
+        // parse key: value
         if (req->header_count < 32) {
-            http_header_t header;
-            if (find_header(data + line_start, &header) == 0) {
-                req->headers[req->header_count++] = header;
+            char *line     = data + start;
+            size_t line_len = i - start;
+            char *colon    = memchr(line, ':', line_len);
+            if (colon) {
+                http_header_t *h = &req->headers[req->header_count];
+                size_t key_len = colon - line;
+                colon++;
+                while (*colon == ' ') colon++;  // trim leading space
+                size_t val_len = (data + i) - colon;
+
+                // copy with bounds check — no strncpy needed
+                key_len = key_len < sizeof(h->key) - 1   ? key_len : sizeof(h->key) - 1;
+                val_len = val_len < sizeof(h->value) - 1 ? val_len : sizeof(h->value) - 1;
+                memcpy(h->key,   line,  key_len); h->key[key_len]   = '\0';
+                memcpy(h->value, colon, val_len); h->value[val_len] = '\0';
+                req->header_count++;
             }
         }
-        data[i] = saved;
-        i += 2; 
+        i += 2;  // skip \r\n
     }
-	req->valid = COMPLETE;
-    return consumed;
+
+    req->valid = INCOMPLETE;
+    return 0;
 }
 
 
@@ -135,35 +117,19 @@ const char * get_header(http_request_t *req, const char *key) {
 	return NULL;
 }
 
-int is_static_request(http_request_t *req) {
-	return strcmp(req->method, "GET") == 0;
-}
 
 
 bool keep_alive(http_request_t *req) {
-	const char *connection_header = get_header(req, "Connection");
-	if (strcmp(req->version, "HTTTP/1.1") == 0) {
-		if (connection_header && strcasecmp(connection_header, "close") == 0) {
-			return false;
-		} else {
-			return true;
-		}
-	} else {
-		if (connection_header && strcasecmp(connection_header, "keep-alive") == 0) {
-			return true;
-		}
-	}
-	return false;
+    const char *conn = get_header(req, "Connection");
+    // HTTP/1.1 is keepalive by default
+    if (strlen(req->version) == 8 && memcmp(req->version, "HTTP/1.1", 8) == 0) {
+        return !(conn && strcasecmp(conn, "close") == 0);
+    }
+    // HTTP/1.0 needs explicit keepalive
+    return conn && strcasecmp(conn, "keep-alive") == 0;
 }
 
 
-
-
-
-
-
-
-
-
-
-
+int is_static_request(http_request_t *req) {
+    return strlen(req->method) == 3 && memcmp(req->method, "GET", 3) == 0;
+}

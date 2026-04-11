@@ -30,7 +30,7 @@ connection_t *conn_pool_get(conn_pool_t *p) {
 void conn_pool_put(conn_pool_t *p, connection_t *conn) {
 	if (p->top < CONN_POOL_CAP) {
 		buffer_reset_and_maybe_shrink(&conn->in, MAX_KEEP_CAP);
-		buffer_reset_and_maybe_shrink(&conn->in, MAX_KEEP_CAP);
+		buffer_reset_and_maybe_shrink(&conn->out, MAX_KEEP_CAP);
 		p->stack[p->top++] = conn;
 		return;
 	}

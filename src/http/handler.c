@@ -150,7 +150,11 @@ void handle_write(int epfd, connection_t *conn) {
 
 	if (conn->sending_file) {
 		int cork = 1;
-		setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+		if (conn->file_size > 4096) {
+			setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+		}
+
+
 		while (conn->file_offset < conn->file_size) {
 			ssize_t n = sendfile(
 					conn->fd,
@@ -165,6 +169,10 @@ void handle_write(int epfd, connection_t *conn) {
 					continue;
 				}
 				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					struct epoll_event ev;
+					ev.events = EPOLLOUT | EPOLLET;
+					ev.data.ptr = conn;
+					epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
 					return;
 				} else {
 					perror("sending_file");
@@ -178,9 +186,10 @@ void handle_write(int epfd, connection_t *conn) {
 				break;
 			}
 		}
-
-		cork = 0;
-		setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+		if (conn->file_size > 4096) {
+			cork = 0;
+			setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+		}
 
 
 		if (conn->file_offset >= conn->file_size) {

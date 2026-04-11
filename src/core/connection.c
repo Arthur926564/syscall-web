@@ -2,6 +2,7 @@
 #include "util/buffer.h"
 #include "http/handler.h"
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -44,9 +45,10 @@ void destroy_connection(int epfd, connection_t *conn) {
 
 void process_connection_event(int epfd, struct epoll_event *ev, conn_pool_t *pool) {
 	connection_t *conn = ev->data.ptr;
-	if (ev->events & (EPOLLERR | EPOLLHUP)) {
+	if (ev->events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
 		conn->state = CONN_CLOSED;
 	}
+
 
 	if (ev->events & EPOLLIN) {
 		handle_read(epfd, conn);
