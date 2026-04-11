@@ -5,7 +5,7 @@ This is a personal project that I started during the winter break, the goal is t
 This project is a lightweight HTTP/1.1 web server written in pure C. It is designed to handle multiple simultaneous client connections efficiently using a combination of non-blocking I/O, epoll, and multithreading.
 
 ## Performance
-You can check out more in detailed on how this server has been build and the performance (always compared with nginx on the same machine) here: [docs.pdf](https://github.com/user-attachments/files/26648074/docs.pdf)
+You can check out more in detailed on how this server has been built and the performances (compared with nginx on the same machine) here: [docs.pdf](https://github.com/user-attachments/files/26648074/docs.pdf)
 
 
 
