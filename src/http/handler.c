@@ -60,7 +60,6 @@ void handle_read(int epfd, connection_t *conn) {
                 // no more data available now
                 break;
             } else {
-                perror("read");
                 conn->state = CONN_CLOSED;
                 return;
             }
@@ -69,10 +68,6 @@ void handle_read(int epfd, connection_t *conn) {
 
     // Try parsing after reading
     int consumed = http_parse_request(&conn->in, &conn->req);
-	fprintf(stderr, "parse result: %d valid: %d data: %.*s\n", 
-        consumed, conn->req.valid, 
-        (int)buffer_len(&conn->in), read_ptr(&conn->in));
-
     if (consumed < 0) {
         http_response_write_404(&conn->out);
 
@@ -96,14 +91,9 @@ void handle_read(int epfd, connection_t *conn) {
 
 	
     buffer_consume(&conn->in, consumed);
-	fprintf(stderr, "serving path: %s is_static: %d\n", 
-        conn->req.path, is_static_request(&conn->req));
-
     if (is_static_request(&conn->req)) {
-		fprintf(stderr, "calling static_serve\n");
         static_serve(&conn->req, conn);
     } else {
-		fprintf(stderr, "writing 404\n");
         http_response_write_404(&conn->out);
     }
 
@@ -113,11 +103,10 @@ void handle_read(int epfd, connection_t *conn) {
     ev.events = EPOLLIN | EPOLLET | EPOLLOUT;
     ev.data.ptr = conn;
 
-    int r  = epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
+    int r = epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
 	if (r < 0) {
 		perror("epoll_ctl MODE EPOLLOUT");
-		r = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->fd, &ev);
-    	fprintf(stderr, "epoll_ctl ADD fallback ret=%d\n", r);
+		epoll_ctl(epfd, EPOLL_CTL_ADD, conn->fd, &ev);
 	}
     conn->state = CONN_WRITING;
 }
@@ -162,7 +151,7 @@ void handle_write(int epfd, connection_t *conn) {
 
 	if (conn->sending_file) {
 		int cork = 1;
-		if (conn->file_size > 4096) {
+		if (conn->file_size > 16384) {
 			setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
 		}
 
@@ -182,7 +171,7 @@ void handle_write(int epfd, connection_t *conn) {
 				}
 				if (errno == EAGAIN || errno == EWOULDBLOCK) {
 					struct epoll_event ev;
-        			ev.events = EPOLLIN | EPOLLET;
+        			ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
 					ev.data.ptr = conn;
 					epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev);
 					return;
@@ -198,14 +187,13 @@ void handle_write(int epfd, connection_t *conn) {
 				break;
 			}
 		}
-		if (conn->file_size > 4096) {
+		if (conn->file_size > 16384) {
 			cork = 0;
 			setsockopt(conn->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
 		}
 
 
 		if (conn->file_offset >= conn->file_size) {
-			close(conn->file_fd);
 			conn->file_fd = -1;
 			conn->file_offset = 0;
 			conn->file_size = 0;

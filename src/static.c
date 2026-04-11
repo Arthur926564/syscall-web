@@ -25,13 +25,7 @@ void static_serve(http_request_t *req, connection_t *conn) {
     }
 
 
-    conn->file_fd = dup(entry->fd);
-	if (conn->file_fd < 0) {
-		conn->sending_file = false;
-		http_response_write_404(&conn->out);
-		return;
-	}
-
+	conn->file_fd = entry->fd;
     conn->file_offset = 0;
     conn->file_size = entry->size;
     conn->sending_file = true;
