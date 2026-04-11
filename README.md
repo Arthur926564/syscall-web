@@ -4,10 +4,8 @@ This is a personal project that I started during the winter break, the goal is t
 ### What?
 This project is a lightweight HTTP/1.1 web server written in pure C. It is designed to handle multiple simultaneous client connections efficiently using a combination of non-blocking I/O, epoll, and multithreading.
 
-The server follows a worker-based architecture:
-- A main thread accepts incoming TCP connections
-- Connections are dispatched to a worker threads
-- Each worker run its own epoll event loop and handles all I/O for its assigned connections
+## Performance
+You can check out more in detailed on how this server has been build and the performance (always compared with nginx on the same machine) here: [docs.pdf](https://github.com/user-attachments/files/26648074/docs.pdf)
 
 
 
@@ -56,12 +54,3 @@ The server is split into layers:
 - Basic api endpoints
 - IPv6 support 
 - Security hardening (needed)
-
-
-
-### Current improvements
-The goal of this section is just for me to "store" the result I have in comparaison to a nginx server.
-I added a startup-time static file cache that preloads metadata for files under www/, avoiding repeated path resolution, file opening, and fstat on every request. On the 100k.bin benchmark with wrk -t8 -c400 -d30s, throughput improved from about 124k req/s to 143k req/s, a gain of roughly 16%.
-
-To have a better understanding on what this means, nginx on my machine using the same file is doing 29k Req/seq, this webserver is currently doing 18k Req/seq (using wrk as a benchmarker)
-```wrk -t8 -c400 -d30s http://127.0.0.1:8081/100k.bin```
