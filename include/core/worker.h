@@ -1,6 +1,7 @@
 #ifndef WORKER_H
 #define WORKER_H
 
+#include <liburing.h>
 #include <pthread.h>
 #include "core/conn_pool.h"
 #include <stddef.h>
@@ -10,6 +11,7 @@
 
 typedef struct {
 	int epfd;
+	struct io_uring ring;
 	int listen_fd;
 	pthread_t thread;
 	conn_pool_t pool;
