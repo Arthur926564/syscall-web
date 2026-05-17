@@ -3,6 +3,7 @@
 #include "core/server.h"
 #include "core/connection.h"
 #include "net/tcp.h"
+#include <liburing.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
