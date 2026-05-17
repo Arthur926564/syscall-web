@@ -34,8 +34,7 @@ int server_init(int port) {
 
 
 void server_loop(int port) {
-	worker_t workers[NWORKERS];
-	memset(workers, 0, sizeof(workers));
+	worker_t *workers = calloc(NWORKERS, sizeof(worker_t));
 
 	for (int i = 0; i < NWORKERS; i++) {
 		if (worker_init(&workers[i], port) < 0) {

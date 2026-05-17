@@ -51,7 +51,11 @@ static void worker_accept(worker_t *w) {
             break;
         }
         connection_t *conn = conn_pool_get(&w->pool);
-        if (!conn) { close(client_fd); continue; }
+        if (!conn) { 
+			fprintf(stderr, "pool echausted\n");
+			close(client_fd);
+			continue; 
+		}
 
         conn->fd    = client_fd;
         conn->state = CONN_READING_HEADERS;
@@ -71,6 +75,7 @@ static void worker_accept(worker_t *w) {
 
 
 int worker_init(worker_t *w, int port) {
+	conn_pool_init(&w->pool);
     w->epfd = epoll_create1(0);
     if (w->epfd < 0) { perror("epoll_create1"); return -1; }
 

@@ -29,8 +29,8 @@ void buffer_reset_and_maybe_shrink(buffer_t *b, size_t max_keep_cap) {
 	}
 	if (b->cap > max_keep_cap) {
 		free(b->data);
-		b->data = NULL;
-		b->cap = 0;
+		b->data = malloc(max_keep_cap);
+		b->cap = b->data ? max_keep_cap : 0;
 	}
 	b->start = 0;
 	b->end = 0;

@@ -10,6 +10,16 @@ typedef struct {
 	uint8_t op;
 } io_tag_t;
 
+
+
+typedef enum {
+	IO_OP_ACCEPT,
+	IO_OP_RECV,
+	IO_OP_SEND,
+	IO_OP_SENFILE,
+	IO_OP_CLOSE
+} io_op_t;
+
 void io_add_accept(struct io_uring *ring, int listen_fd);
 void io_add_recv(struct io_uring *ring, connection_t *conn);
 void io_add_send(struct io_uring *ring, connection_t *conn);

@@ -5,11 +5,19 @@
 
 #define MAX_KEEP_CAP (64 * 1024)
 
+void conn_pool_init(conn_pool_t *p) {
+	p->top = 0;
+	for (int i = 0; i < CONN_POOL_CAP; i++) {
+		buffer_init(&p->conns[i].in);
+		buffer_init(&p->conns[i].out);
+		p->stack[p->top++] = &p->conns[i];
+	}
+}
+
 
 connection_t *conn_pool_get(conn_pool_t *p) {
 	if (p->top > 0) {
         connection_t *conn = p->stack[--p->top];
-        // buffers already allocated and reset by conn_pool_put
         conn->fd = -1;
         conn->state = CONN_READING_HEADERS;
         conn->write_offset = 0;
@@ -20,10 +28,7 @@ connection_t *conn_pool_get(conn_pool_t *p) {
         conn->sending_file = false;
         return conn;
 	}
-	connection_t * conn = calloc(1, sizeof(connection_t));
-    buffer_init(&conn->in);
-    buffer_init(&conn->out);
-	return conn;
+	return NULL;
 
 }
 
