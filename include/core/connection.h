@@ -1,6 +1,7 @@
 #ifndef CORE_CONNECTION_H
 #define CORE_CONNECTION_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
@@ -28,6 +29,9 @@ typedef struct connection {
     off_t file_offset; 
     off_t file_size;
     bool sending_file;
+
+	int inflight;
+	bool closing;
 } connection_t;
 
 

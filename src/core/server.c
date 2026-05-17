@@ -5,6 +5,8 @@
 #include "net/tcp.h"
 #include "os/fs.h"
 #include "static/static.h"
+#include <dirent.h>    // DIR, opendir, readdir, closedir
+#include <sys/resource.h>  // setrlimit, getrlimit, struct rlimit
 
 #include <asm-generic/errno-base.h>
 #include <asm-generic/errno.h>
@@ -43,6 +45,10 @@ void server_loop(int port) {
 		if (worker_start(&workers[i]) < 0) {
 			exit(1);
 		}
+		DIR *fd_dir = opendir("/proc/self/fd");
+        int count = 0;
+        while (readdir(fd_dir)) count++;
+        closedir(fd_dir);
 	}
 
 	for (int i = 0; i < NWORKERS; i++) {

@@ -24,6 +24,8 @@ connection_t *connection_create(int fd) {
 	connection->file_offset = 0;
 	connection->file_size = 0;
 	connection->sending_file = false;
+	connection->inflight = 0;
+	connection->closing = false;
 	return connection;
 }
 

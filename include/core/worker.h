@@ -15,6 +15,7 @@ typedef struct {
 	int listen_fd;
 	pthread_t thread;
 	conn_pool_t pool;
+	int pipe_fd[2];
 } worker_t;
 
 

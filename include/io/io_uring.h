@@ -3,7 +3,6 @@
 #include <liburing.h>
 #include "core/conn_pool.h"
 
-
 int io_ring_init(struct io_uring *ring, int queue_depth);
 
 void io_ring_destroy(struct io_uring *ring);

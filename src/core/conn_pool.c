@@ -1,6 +1,8 @@
 #include "core/connection.h"
 #include "util/buffer.h"
+#include <fcntl.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "core/conn_pool.h"
 
 #define MAX_KEEP_CAP (64 * 1024)
@@ -26,6 +28,8 @@ connection_t *conn_pool_get(conn_pool_t *p) {
         conn->file_offset = 0;
         conn->file_size = 0;
         conn->sending_file = false;
+		conn->inflight = 0;
+		conn->closing = false;
         return conn;
 	}
 	return NULL;

@@ -4,6 +4,7 @@
 #include <liburing.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include "io/io_uring.h"
 #include "core/conn_pool.h"
 
@@ -14,6 +15,7 @@ int io_ring_init(struct io_uring *ring, int queue_depth) {
 	}
 	int err = io_uring_queue_init(queue_depth, ring, 0);
 	if (err < 0) {
+		fprintf(stderr, "io_uring_queue_init failed: %s (err=%d)\n", strerror(-err), err);
 		return err;
 	}
 	return 0;
