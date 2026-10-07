@@ -1,39 +1,74 @@
-benchmark at commit: [dev 32069c1]
+Same-session comparison, 100 KiB static file (./www/100k.bin)
+workload: wrk -t8 -c400 -d30s --latency, 10 s warm-up, 3 runs per server
+hardware: ThinkPad T16, Intel Core Ultra 7 155U (14 cores) @ 4.80 GHz, 32 GiB, Arch Linux
+caveat:   wrk and the server share the same 14 cores.
 
+io_uring design in use: multishot accept, IORING_OP_RECV/SEND for header I/O,
+and IORING_OP_SEND of mmap'd file contents for the body. Splice was prototyped
+but abandoned (see "splice side-note" below).
 
-Server Software:        
-Server Hostname:        localhost
-Server Port:            8080
+------- this server, io_uring (mmap + IORING_OP_SEND) -------
+run 1   163,163 req/s   avg 2.03 ms   p50 1.38 ms   p75 2.78 ms   p90 4.40 ms   p99 8.14 ms
+run 2   165,189 req/s   avg 2.00 ms   p50 1.40 ms   p75 2.75 ms   p90 4.31 ms   p99 7.55 ms
+run 3   166,315 req/s   avg 2.02 ms   p50 1.42 ms   p75 2.78 ms   p90 4.34 ms   p99 7.57 ms
 
-Document Path:          /index.html
-Document Length:        308 bytes
+------- this server, epoll (main @ ebf94f7, uses sendfile(2)) -------
+run 1   292,640 req/s   avg 5.13 ms   p50 683 us    p75 1.92 ms   p90 22.66 ms  p99 40.44 ms
+run 2   287,721 req/s   avg 4.93 ms   p50 715 us    p75 1.83 ms   p90 21.52 ms  p99 40.37 ms
+run 3   287,477 req/s   avg 4.94 ms   p50 717 us    p75 1.87 ms   p90 21.53 ms  p99 40.38 ms
 
-Concurrency Level:      100
-Time taken for tests:   0.064 seconds
-Complete requests:      10000
-Failed requests:        0
-Keep-Alive requests:    10000
-Total transferred:      3970000 bytes
-HTML transferred:       3080000 bytes
-Requests per second:    156096.34 [#/sec] (mean)
-Time per request:       0.641 [ms] (mean)
-Time per request:       0.006 [ms] (mean, across all concurrent requests)
-Transfer rate:          60517.82 [Kbytes/sec] received
+------- nginx 8 workers, epoll, SO_REUSEPORT (sendfile on) -------
+run 1   287,839 req/s   avg 1.26 ms   p50 0.93 ms   p75 1.68 ms   p90 2.57 ms   p99 4.40 ms
+run 2   274,748 req/s   avg 1.31 ms   p50 1.00 ms   p75 1.74 ms   p90 2.62 ms   p99 4.48 ms
+run 3   275,595 req/s   avg 1.31 ms   p50 0.99 ms   p75 1.74 ms   p90 2.63 ms   p99 4.49 ms
 
-Connection Times (ms)
-              min  mean[+/-sd] median   max
-Connect:        0    0   0.1      0       1
-Processing:     0    1   0.2      1       2
-Waiting:        0    1   0.2      1       2
-Total:          0    1   0.2      1       2
+Observations:
+- Throughput: io_uring (mmap+SEND) is ~40 % below both nginx and the epoll
+  build. The epoll build is now within noise of nginx on throughput.
+- Latency tail: io_uring is p99 ≈ 7.5 ms, much closer to nginx's ~5 ms than
+  to the epoll build's ~40 ms. Giving up sendfile cost throughput but mostly
+  killed the fairness tail.
+- The headline is that *using io_uring correctly on this workload is not free*.
+  Our sendfile-based epoll build pays nothing per byte (zero-copy from page
+  cache); our io_uring build pays one kernel memcpy from the mmap'd buffer
+  into the socket. For 100 KiB at ~165 k req/s that is ~16 GB/s of memcpy.
 
-Percentage of the requests served within a certain time (ms)
-  50%      1
-  66%      1
-  75%      1
-  80%      1
-  90%      1
-  95%      1
-  98%      2
-  99%      2
- 100%      2 (longest request)
+Splice side-note (abandoned):
+I first ported the body path to linked IORING_OP_SPLICE SQEs (file -> pipe,
+pipe -> socket). Two problems surfaced:
+  1. io_uring IO_LINK cancels the second SQE if the first short-completes.
+     Splice short-completes routinely because the pipe fills.
+  2. On this kernel, with ~4000 pipes open (one per pooled connection), the
+     pipe-user-pages soft limit forces each pipe to just 2 pages (8 KiB).
+     F_GETPIPE_SZ still reports the requested 1 MiB, but splice actually
+     caps per-call to 8 KiB. A 100 KiB transfer became ~13 round-trips to
+     an io_uring kernel worker thread, each ~3 ms. Measured result: 10 k
+     req/s with uniform ~41 ms per-request latency. See
+     /proc/sys/fs/pipe-user-pages-soft.
+Switching to mmap + IORING_OP_SEND side-stepped both.
+
+IORING_OP_SEND_ZC was tried to recover zero-copy; it produced garbage data
+and ~6 M read errors in wrk under keep-alive load. Likely interaction
+between the F_NOTIF completion and immediate connection reuse — needs
+investigation.
+
+perf record of the final io_uring server (user-space only,
+kernel.perf_event_paranoid=2):
+    16.83%  http_parse_request
+     9.84%  [libc, unresolved — memcpy into socket buffer]
+     9.50%  handle_recv
+     8.01%  handle_sendfile
+     6.45%  handle_send
+     5.94%  buffer_reset_and_maybe_shrink
+     4.66%  produce
+     3.98%  io_add_send
+     2.97%  buffer_len
+     2.76%  http_response_write_file
+     2.29%  worker_loop
+     2.23%  buffer_append
+     1.33%  io_add_sendfile
+     1.14%  io_add_recv
+     0.84%  static_cache_lookup
+     0.41%  keep_alive
+Note: sendfile64 is now absent from the profile (it was 9.4 % in the previous
+measurement when handle_send still called sendfile(2) directly).

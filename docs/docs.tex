@@ -15,33 +15,21 @@
 \maketitle
 
 \begin{abstract}
-This report presents the design and performance evaluation of a minimal HTTP/1.1 server
-implemented in C. The server relies on non-blocking I/O, an epoll-based event loop, and a
-multithreaded worker architecture using \texttt{SO\_REUSEPORT} to handle concurrent connections
-efficiently. We analyse architectural choices, implementation challenges, and evaluate performance
-under synthetic workloads using \texttt{wrk}. The final implementation achieves throughput within
-run-to-run variance of \texttt{nginx} on static file serving.
+This report presents the design and performance evaluation of a minimal HTTP/1.1 server implemented in C. The server relies on non-blocking I/O and a multithreaded worker architecture using \texttt{SO\_REUSEPORT} to handle concurrent connections efficiently. The event loop was first built on \texttt{epoll} with \texttt{sendfile(2)} for the body, then fully re-wired on \texttt{io\_uring} (accept/recv/send plus \texttt{IORING\_OP\_SEND} of an mmap'd file cache for the body). On a $100\,\mathrm{KiB}$ static file, measured back-to-back in the same session: the \texttt{epoll} build sustains $\approx 287\,\mathrm{k}$ req/s,  within noise of \texttt{nginx} on this hardware while the \texttt{io\_uring} build sustains $\approx 165\,\mathrm{k}$ req/s. The gap is almost entirely the cost of giving up \texttt{sendfile}'s zero-copy for a kernel memcpy out of the mmap region. In exchange, the \texttt{io\_uring} build cuts the tail from $p99 \approx 40\,\mathrm{ms}$ to $p99 \approx 7.6\,\mathrm{ms}$, bringing it within $\approx 2.5\,\mathrm{ms}$ of \texttt{nginx}.
 \end{abstract}
 
 \section{Introduction}
 
-The goal of this project was to gain a deeper understanding of HTTP and network programming.
-You can find the GitHub repository at this link. I started this project as a simple blocking,
-single-threaded, loop-based server. After understanding those fundamentals I implemented header
-parsing which enabled persistent (keep-alive) connections. The goal after that introduction was
-to have a very efficient and scalable server. Those reasons motivated the transition to a
-non-blocking server architecture, allowing the server to handle multiple connections concurrently
-using asynchronous I/O, and eventually to a fully multithreaded design.
+The goal of this project was to gain a deeper understanding of HTTP and network programming. You can find the GitHub repository at this \href{https://github.com/Arthur926564/syscall-web/tree/feature-io-uring}{link}. I started this project as a simple blocking, single-threaded, loop-based server. After understanding those fundamentals I implemented header parsing which enabled persistent (keep-alive) connections. The goal after that introduction was to have a very efficient and scalable server. Those reasons motivated the transition to a non-blocking server architecture, allowing the server to handle multiple connections concurrently using asynchronous I/O, and eventually to a fully multithreaded design.
 
 \section{Architecture}
 
-The server follows an event-driven architecture. It started as a single-threaded reactor pattern
-and evolved into a multi-threaded design where each worker thread owns its own epoll instance
-and its own listen socket via \texttt{SO\_REUSEPORT}. The architecture is divided into 7 layers:
+The server follows an event-driven architecture. It started as a single-threaded reactor pattern and evolved into a multi-threaded design where each worker thread owns its own event loop and its own listen socket via \texttt{SO\_REUSEPORT}. The event loop was initially built on \texttt{epoll} and was subsequently rewritten on top of \texttt{io\_uring} (see Section~\ref{sec:iouring}). The architecture is divided into 7 layers:
 
 \begin{itemize}
     \item \textbf{core}: coordinates the server and orchestrates interactions between components
-    \item \textbf{epoll}: contains structs to use epoll in the server loop
+    \item \textbf{io}: owns the \texttt{io\_uring} ring and submits/completes I/O operations
+          (replaces the earlier epoll layer)
     \item \textbf{HTTP}: parses requests, turns plain text into \texttt{http\_request\_t}
     \item \textbf{net}: handles connection setup, TCP listen and accept
     \item \textbf{os}: provides low-level read/write operations and filesystem access
@@ -113,6 +101,75 @@ per connection drops from: \texttt{lock $\to$ memcpy $\to$ eventfd write $\to$ w
 lock $\to$ drain $\to$ epoll\_ctl} to simply: \texttt{epoll fires $\to$ accept4 $\to$
 epoll\_ctl}.
 
+\subsection{Migration from epoll to io\_uring}
+\label{sec:iouring}
+
+After the \texttt{epoll} implementation reached parity with \texttt{nginx}, \texttt{perf} profiles showed that roughly a third of CPU time was being spent in individual syscalls (\texttt{epoll\_ctl}, \texttt{read}, \texttt{write}, \texttt{sendfile}). To reduce this overhead, the event loop was rewritten on top of \texttt{io\_uring}: each worker now owns a submission/completion ring instead of an \texttt{epoll} instance, and I/O is driven by submitting SQEs rather than reacting to readiness notifications.
+
+The reactive readiness model (\emph{the fd is ready; now call read}) was replaced with a proactive completion model (\emph{read this; tell me when it's done}). Concretely:
+
+\begin{itemize}
+    \item \textbf{accept}: a single \texttt{IORING\_OP\_ACCEPT} in multishot mode
+          (\texttt{io\_uring\_prep\_multishot\_accept}) is submitted once per worker and
+          delivers every new connection as a CQE until it is cancelled.
+    \item \textbf{recv/send (headers)}: each connection owns an \texttt{inflight}
+          counter; \texttt{io\_uring\_prep\_recv} and \texttt{io\_uring\_prep\_send} are
+          queued with the connection pointer packed with the operation type in the SQE
+          user-data (the low 3 bits of the aligned pointer encode the \texttt{io\_op\_t}).
+    \item \textbf{file body}: the static cache \texttt{mmap}s each file at startup; the
+          send path is an \texttt{IORING\_OP\_SEND} of the mmap'd region
+          (Section~\ref{sec:body}). The earlier \texttt{sendfile(2)} call is gone.
+    \item \textbf{worker loop}: a single \texttt{io\_uring\_submit\_and\_wait} call per
+          iteration both submits all queued SQEs and blocks for at least one completion;
+          CQEs are then drained in a tight \texttt{io\_uring\_for\_each\_cqe} loop.
+\end{itemize}
+
+Each worker thread is still entirely self-contained: it has its own ring, its own listen socket, its own connection pool. Because the ring already acts as a wait point, the earlier \texttt{eventfd} and \texttt{epoll\_ctl} machinery is gone from the hot path.
+
+\subsubsection{Choosing a body-transfer primitive}
+\label{sec:body}
+
+The natural \texttt{io\_uring} replacement for \texttt{sendfile(2)} is a pair of linked
+\texttt{IORING\_OP\_SPLICE} SQEs: file~$\to$~pipe, pipe~$\to$~socket, chained via
+\texttt{IOSQE\_IO\_LINK}. We implemented this first and ran into two kernel-level
+obstacles on the test machine (Linux 7.1.3):
+
+\begin{enumerate}
+    \item \textbf{Linked SQEs cancel on short completions.} \texttt{IOSQE\_IO\_LINK}
+          runs the next SQE only if the previous one succeeds \emph{fully}. A short
+          result on the first splice (common when the pipe fills) cancels the second
+          with \texttt{-ECANCELED}. The documentation for a few other opcodes
+          (\texttt{read}/\texttt{write}/\texttt{recv}/\texttt{send}) carves out an
+          exception for short results; splice is not in that list.
+    \item \textbf{\texttt{pipe-user-pages-soft} silently caps per-call splice size.}
+          With one pipe per pooled connection ($\approx 4096$ pipes), the user's total
+          pinned pipe pages exceeds \texttt{/proc/sys/fs/pipe-user-pages-soft}
+          ($16384$ pages = $64\,\mathrm{MiB}$). \texttt{F\_SETPIPE\_SZ} reports success
+          and \texttt{F\_GETPIPE\_SZ} still returns the requested size, but \texttt{io\_uring}'s
+          \texttt{splice} actually caps per call to 2 pages ($8\,\mathrm{KiB}$). A
+          $100\,\mathrm{KiB}$ body then takes thirteen async-worker dispatches; measured
+          end-to-end this gave $\approx 10\,\mathrm{k}$ req/s with a uniform
+          $\approx 41\,\mathrm{ms}$ latency floor.
+\end{enumerate}
+
+We therefore abandoned splice and chose a simpler primitive: \texttt{mmap} every
+cached file at startup, then push the body with a single \texttt{IORING\_OP\_SEND} of
+the mmap'd region. This gives up zero-copy --- the kernel has to copy from the mapped
+page cache into the socket buffer --- but a $100\,\mathrm{KiB}$ copy at
+$\approx 15\,\mathrm{GB/s}$ costs $\sim 7\,\mathrm{\mu s}$ and compares well against
+losing an entire async-worker dispatch per $8\,\mathrm{KiB}$. We also tried
+\texttt{IORING\_OP\_SEND\_ZC} to recover zero-copy, but on this kernel, under
+keep-alive load, we observed millions of \texttt{wrk} read errors; the interaction
+between the \texttt{F\_NOTIF} completion and immediate connection reuse needs more
+investigation before that path can be revived.
+
+\paragraph{Trade-offs} The move to \texttt{io\_uring} is a strict reduction in syscalls but
+is not free. The connection state machine becomes a completion state machine: operations
+can complete partially (\texttt{res < len}) and have to be re-submitted, close has to wait
+on \texttt{inflight} reaching zero so completions do not fire on a reused slot, and errors
+surface as negative \texttt{cqe->res} rather than \texttt{errno}. Each of these edge cases
+was a separate class of bug during the rewrite.
+
 % \subsection{State Machine}
 %
 % One of the issues during the development of this server was that, as a connection does not
@@ -158,12 +215,17 @@ development.
 
 Benchmarks were performed using \texttt{wrk}:
 \begin{verbatim}
-wrk -t8 -c400 -d30s http://127.0.0.1:8080/<file>
+wrk -t8 -c400 -d30s --latency http://127.0.0.1:8080/<file>
 \end{verbatim}
 
+Each server was warmed up for 10\,s and then measured over three independent 30\,s runs.
+To avoid cross-session drift, the \texttt{io\_uring} build, the \texttt{epoll} build, and
+\texttt{nginx} were all benchmarked back-to-back within a single session.
+
 The setup is a ThinkPad T16 with an Intel Core Ultra 7 155U (14 cores) @ 4.80\,GHz with
-32\,GiB of RAM running Arch Linux. All benchmarks compare directly against \texttt{nginx}
-running on the same machine on port 8081, serving identical files.
+32\,GiB of RAM running Arch Linux. \texttt{nginx} runs on the same machine on port 8081
+with 8 workers and \texttt{SO\_REUSEPORT}, serving the identical file tree. All benchmarks
+share the same hardware with the load generator: \texttt{wrk} and the server under test compete for the same 14 cores, so the numbers below are not the server's ceiling on dedicated hardware, they are a self-consistent comparison on one machine.
 
 \section{Discussion}
 
@@ -223,6 +285,15 @@ each change. The following optimisations were applied in order of impact:
     request regardless of file size, adding two \texttt{setsockopt} syscalls per response.
     Gating behind a file-size threshold (only cork when file $> 16\,\mathrm{KiB}$) removed
     this overhead for the common case of small files.
+
+    \item \textbf{io\_uring event loop (complete)}: replaced \texttt{epoll} +
+    \texttt{read}/\texttt{write} + \texttt{sendfile(2)} with a per-worker
+    \texttt{io\_uring} ring: multishot \texttt{accept}, \texttt{IORING\_OP\_RECV}/\texttt{SEND}
+    for header I/O, and \texttt{IORING\_OP\_SEND} of an \texttt{mmap}'d static-file
+    cache for the body. Linked \texttt{IORING\_OP\_SPLICE} was tried first and
+    discarded for the reasons in Section~\ref{sec:body}. Same-session measurements
+    against the \texttt{epoll} build show a $\approx 40\,\%$ throughput regression and
+    a $5\times$ smaller $p99$ tail; see Section~\ref{sec:bench}.
 \end{enumerate}
 
 \subsection{Limitations}
@@ -230,88 +301,142 @@ each change. The following optimisations were applied in order of impact:
 Performance behaviour can be interpreted through three regimes: connection-bound, CPU-bound,
 and network-bound execution. Enabling persistent connections moved the server from a
 connection-bound regime to a CPU-bound regime, significantly increasing throughput. The
-multithreaded design then distributed that CPU work across cores, pushing throughput further.
+multithreaded \texttt{SO\_REUSEPORT} design then distributed that CPU work across cores.
 
-The remaining bottlenecks identified by \texttt{perf} are largely irreducible within the
-\texttt{epoll} architecture: HTTP parsing ($\sim$11\,\%), \texttt{epoll\_ctl} ($\sim$10\,\%),
-\texttt{read}/\texttt{write} syscalls ($\sim$10\,\% each), and \texttt{sendfile}
-($\sim$7\,\%). These represent the fundamental cost of serving a file over a socket.
+Under the \texttt{epoll} architecture, \texttt{perf} attributed $\sim$11\,\% of cycles to
+HTTP parsing, $\sim$10\,\% to \texttt{epoll\_ctl}, $\sim$10\,\% each to \texttt{read} and
+\texttt{write}, and $\sim$7\,\% to \texttt{sendfile} --- i.e., roughly $38\,\%$ of the
+budget sat in per-syscall mechanics. The \texttt{io\_uring} rewrite was aimed at that
+budget: a single \texttt{io\_uring\_submit\_and\_wait} per loop iteration replaces one
+\texttt{epoll\_wait} plus one syscall per I/O. See Section~\ref{sec:bench} for how far
+the rewrite actually got.
 
 \section{Benchmark Results}
+\label{sec:bench}
 
-\paragraph{Final benchmark --- $100\,\mathrm{KiB}$ file}
-After all optimisations, the server sustained $248{,}280$ requests per second with a mean
-latency of $1.33\,\mathrm{ms}$ and a transfer rate of $23.70\,\mathrm{GB/s}$. Under the
-same conditions \texttt{nginx} achieved $251{,}822$ requests per second, placing the server
-at approximately $98.6\,\%$ of \texttt{nginx} throughput --- a gap within run-to-run
-variance.
+\paragraph{Same-session comparison --- $100\,\mathrm{KiB}$ file}
+The three servers were benchmarked back-to-back in a single session (three 30\,s runs
+each, $8$ threads, $400$ concurrent connections, $10$\,s warm-up). Table~\ref{tab:bench}
+reports the median run.
 
 \begin{table}[h]
 \centering
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrrr}
 \toprule
-\textbf{Server} & \textbf{Req/s} & \textbf{Avg latency} & \textbf{Transfer rate} \\
+\textbf{Server} & \textbf{Req/s} & \textbf{p50} & \textbf{p75} & \textbf{p90} & \textbf{p99} \\
 \midrule
-This server & $248{,}280$ & $1.33\,\mathrm{ms}$ & $23.70\,\mathrm{GB/s}$ \\
-\texttt{nginx} & $251{,}822$ & $4.01\,\mathrm{ms}$ & $24.07\,\mathrm{GB/s}$ \\
+This server (\texttt{io\_uring}, \texttt{mmap+SEND}) & $165{,}190$ & $1.40\,\mathrm{ms}$ & $2.75\,\mathrm{ms}$ & $4.31\,\mathrm{ms}$ & $7.55\,\mathrm{ms}$ \\
+This server (\texttt{epoll}, \texttt{sendfile})       & $287{,}722$ & $715\,\mu\mathrm{s}$   & $1.83\,\mathrm{ms}$ & $21.52\,\mathrm{ms}$ & $40.37\,\mathrm{ms}$ \\
+\texttt{nginx} (epoll, \texttt{sendfile})             & $275{,}595$ & $0.99\,\mathrm{ms}$ & $1.74\,\mathrm{ms}$ & $2.63\,\mathrm{ms}$ & $4.49\,\mathrm{ms}$ \\
 \bottomrule
 \end{tabular}
-\caption{Static file throughput, $100\,\mathrm{KiB}$ file, 8 threads, 400 concurrent
-connections, 30\,s run.}
+\caption{Static file throughput and latency percentiles, $100\,\mathrm{KiB}$ file,
+\texttt{wrk -t8 -c400 -d30s --latency}, median of three 30\,s runs after a 10\,s
+warm-up, all three servers run back-to-back in one session on the same hardware
+contended by \texttt{wrk}.}
+\label{tab:bench}
 \end{table}
 
-\paragraph{Profiling summary}
-Successive \texttt{perf} reports showed the hotspot distribution converging toward
-irreducible costs. The final profile attributes approximately $11\,\%$ of cycles to HTTP
-request parsing, $10\,\%$ each to \texttt{epoll\_ctl} and \texttt{read}/\texttt{write}
-syscalls, and $7\,\%$ to \texttt{sendfile}. No single user-space function dominates; the
-remaining overhead is split across \texttt{buffer\_ensure\_writable},
-\texttt{http\_response\_write\_file}, and kernel time. This distribution indicates that the
-implementation has reached the practical ceiling of the \texttt{epoll}-based architecture
-for this workload.
+\paragraph{Throughput}
+The \texttt{epoll} build is within noise of \texttt{nginx} on throughput; both use
+\texttt{sendfile(2)} and get the kernel to DMA directly from the page cache to the
+socket. The \texttt{io\_uring} build is $\approx 40\,\%$ slower. The reason is simple:
+by moving the body to \texttt{IORING\_OP\_SEND} of an \texttt{mmap}'d region, the
+kernel has to copy from the mapped pages into the socket buffer. For
+$100\,\mathrm{KiB}$ at $\sim 165\,\mathrm{k}$~req/s, that is $\approx 15\,\mathrm{GB/s}$
+of memcpy sitting squarely in the hot path.
+
+\paragraph{Latency tail}
+Giving up \texttt{sendfile} cost throughput but mostly removed the fairness tail that
+the \texttt{epoll} build had: $p90$ drops from $21.5\,\mathrm{ms}$ to $4.3\,\mathrm{ms}$,
+$p99$ from $40\,\mathrm{ms}$ to $7.6\,\mathrm{ms}$. We did not instrument this directly,
+so the mechanism is still a hypothesis: in the \texttt{epoll} build, \texttt{handle\_send}
+calls \texttt{sendfile(2)} in a tight loop until \texttt{EAGAIN}, which can monopolise a
+worker thread for the duration of a large file transfer and starve other connections
+scheduled to the same worker. The \texttt{io\_uring} build submits a single SEND and
+returns to the drain loop, so the worker is free to interleave work across connections.
+
+\paragraph{Where cycles go now}
+A \texttt{perf record} run on the \texttt{io\_uring} server during a full-load
+\texttt{wrk} is shown in Table~\ref{tab:perf}. \texttt{sendfile64}, which was
+$9.4\,\%$ of samples in the previous measurement, is now absent --- the port is
+complete. HTTP parsing is the single largest user-space hotspot at $16.8\,\%$;
+the next largest resolved symbol is \texttt{handle\_recv} at $9.5\,\%$. A
+$9.8\,\%$ chunk sits at an unresolved libc address; the stack above it leads
+through \texttt{io\_add\_send} and \texttt{handle\_send}, which is consistent with
+the kernel's socket-write memcpy path that this build now owns.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lr}
+\toprule
+\textbf{Symbol (user space)} & \textbf{Self} \\
+\midrule
+\texttt{http\_parse\_request}       & $16.8\,\%$ \\
+unresolved (libc, socket copy)      & $9.8\,\%$ \\
+\texttt{handle\_recv}               & $9.5\,\%$ \\
+\texttt{handle\_sendfile}           & $8.0\,\%$ \\
+\texttt{handle\_send}               & $6.5\,\%$ \\
+\texttt{buffer\_reset\_and\_maybe\_shrink} & $5.9\,\%$ \\
+\texttt{produce}                    & $4.7\,\%$ \\
+\texttt{io\_add\_send}              & $4.0\,\%$ \\
+\texttt{http\_response\_write\_file}& $2.8\,\%$ \\
+\texttt{worker\_loop}               & $2.3\,\%$ \\
+\texttt{buffer\_append}             & $2.2\,\%$ \\
+\texttt{io\_add\_sendfile}          & $1.3\,\%$ \\
+\texttt{io\_add\_recv}              & $1.1\,\%$ \\
+\bottomrule
+\end{tabular}
+\caption{\texttt{perf record -F 999 -g} on the final \texttt{io\_uring} server during a
+20\,s \texttt{wrk} load (user-space samples only; kernel symbols are hidden by
+\texttt{kernel.perf\_event\_paranoid=2}).}
+\label{tab:perf}
+\end{table}
 
 \paragraph{Connection stability}
 During long keep-alive stress tests, sporadic \texttt{ECONNRESET} errors were observed,
 consistent with \texttt{wrk} tearing down connections mid-flight at the end of a test window.
-These are suppressed in the final implementation by ignoring \texttt{ECONNRESET} and
-\texttt{EPIPE} on the read and write paths respectively. No errors were observed under normal
-single-connection \texttt{curl} workloads once the keep-alive parsing bug was corrected.
+These are handled in the final implementation by closing and cleaning up the connection
+(returning the slot to the pool) rather than logging an error, since the peer has already
+left. No errors were observed under normal single-connection \texttt{curl} workloads once
+the keep-alive parsing bug was corrected.
 
 \section{Future Work}
 
-\paragraph{io\_uring}
-The next architectural step would be to replace the \texttt{epoll} event loop with
-\texttt{io\_uring}. Rather than one syscall per I/O operation, \texttt{io\_uring} allows
-submitting a ring of operations and collecting completions in bulk via a single
-\texttt{io\_uring\_enter} call. This would reduce the cost of \texttt{epoll\_ctl},
-\texttt{read}, \texttt{write}, and \texttt{sendfile} --- currently responsible for roughly
-$35\,\%$ of cycles --- at the cost of a significant rewrite of the event loop and connection
-state machine.
+\paragraph{Recover zero-copy on the body path}
+The $\approx 40\,\%$ throughput gap against \texttt{nginx} is almost entirely the memcpy
+from the mmap'd buffer into the socket buffer that \texttt{IORING\_OP\_SEND} incurs.
+Two routes worth trying:
+\begin{itemize}
+    \item \textbf{\texttt{IORING\_OP\_SEND\_ZC}}: we tried this and saw millions of
+    \texttt{wrk} read errors under keep-alive, likely because our connection reset on
+    keep-alive raced with the \texttt{F\_NOTIF} completion. The fix is probably to
+    track per-connection outstanding ZC notifications and defer slot reuse until the
+    notification has arrived (or to use the recently added
+    \texttt{IORING\_SEND\_ZC\_REPORT\_USAGE} to detect when ZC degraded to copy).
+    \item \textbf{Fix the splice path}: at the cost of a non-trivial state-machine
+    rewrite, the SPLICE pair could work if the per-connection pipe scheme were
+    replaced with a per-worker SP (one pipe per worker, serialising file transfers
+    through a FIFO). This loses parallelism per worker but keeps zero-copy.
+\end{itemize}
+
+\paragraph{Isolate the load generator}
+\texttt{wrk} currently shares the 14 cores with the server. Running \texttt{wrk} on another machine (or just pinning \texttt{wrk} and the workers to disjoint CPU sets) would make the measurement no longer joint-CPU-bound, which is particularly relevant for comparing against \texttt{nginx}: \texttt{nginx}'s number probably has more headroom than ours.
+
+\paragraph{Registered buffers and fixed files}
+The ring already supports registered buffers (\texttt{io\_uring\_register\_buffers}) and registered file descriptors (\texttt{io\_uring\_register\_files}). The scaffolding is in \texttt{src/io/io\_uring.c}; wiring the hot path through \texttt{IORING\_OP\_READ\_FIXED}/\texttt{IORING\_OP\_WRITE\_FIXED} would remove some per-SQE kernel overhead that currently shows up as the unresolved libc samples in Table~\ref{tab:perf}.
 
 \paragraph{Precomputed response headers}
-Currently \texttt{http\_response\_write\_file} builds the response headers at request time
-via several \texttt{buffer\_append} calls. Since the files are cached at startup with known
-sizes and content types, the full response header string could be precomputed once per
-cached file and stored in \texttt{static\_file\_entry\_t}, reducing the per-request header
-path to a single \texttt{memcpy}.
+Currently \texttt{http\_response\_write\_file} builds the response headers at request time via several \texttt{buffer\_append} calls. Since the files are cached at startup with known sizes and content types, the full response header string could be precomputed once per cached file and stored in \texttt{static\_file\_entry\_t}, reducing the per-request header path to a single \texttt{memcpy}.
 
 \paragraph{HTTPS}
-Moving from HTTP to HTTPS requires an SSL/TLS certificate. OpenSSL is the standard way of
-doing it. Adding encryption changes the architecture by introducing a new TLS layer between
-the HTTP and connection layers. TLS will introduce CPU cost due to encryption and handshake
-overhead, which makes performance tracking more difficult. This feature is planned after the
-above optimisations.
+Moving from HTTP to HTTPS requires an SSL/TLS certificate. OpenSSL is the standard way of doing it. Adding encryption changes the architecture by introducing a new TLS layer between the HTTP and connection layers. TLS will introduce CPU cost due to encryption and handshake overhead, which makes performance tracking more difficult. This feature is planned after the above optimisations.
 
 \section{Conclusion}
 
-As we have seen, non-blocking I/O combined with keep-alive and a multithreaded
-\texttt{SO\_REUSEPORT} design allowed the server to reach throughput within run-to-run
-variance of \texttt{nginx} on static file serving.
+Non-blocking I/O combined with keep-alive and a multithreaded \texttt{SO\_REUSEPORT} design brought the \texttt{epoll} build to throughput parity with \texttt{nginx} on static file serving. The subsequent full \texttt{io\_uring} port is not a free win: on this kernel, splice is not a usable \texttt{sendfile} replacement for a 400-connection pool (pipe-page limits cap per-call splice to 8\,KiB), so the body path moved to \texttt{IORING\_OP\_SEND} of an \texttt{mmap}'d static cache. That gave up zero-copy and cost $\approx 40\,\%$ of the throughput, but it also cut $p99$ from $40\,\mathrm{ms}$ down to $7.6\,\mathrm{ms}$: close to \texttt{nginx}, and plausibly a sign that the \texttt{epoll} build's tail came from \texttt{sendfile}-induced head-of-line blocking inside a worker rather than something fundamentally wrong with the architecture. Recovering zero-copy on \texttt{io\_uring} (via \texttt{SEND\_ZC} or a reworked splice) is the next real experiment.
 
-This project really taught me how networking works at a very low level. I also really
-enjoyed going from a simple kind of `single-cycle' server, into `multi-cycle', into a
-`superscalar' processor. And as a natural extension, the architecture would become a
-`multi-core' server, which is exactly what it did.
+This project really taught me how networking works at a very low level. I also really enjoyed going from a simple kind of `single-cycle' server, into `multi-cycle', into a `superscalar' processor. And as a natural extension, the architecture would become a `multi-core' server, which is exactly what it did.
 
 \end{document}
 
