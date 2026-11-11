@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -26,6 +27,7 @@ void static_serve(http_request_t *req, connection_t *conn) {
 
 
 	conn->file_fd = entry->fd;
+	conn->file_data = entry->data;
     conn->file_offset = 0;
     conn->file_size = entry->size;
     conn->sending_file = true;
@@ -137,8 +139,18 @@ static int scan_dir(static_file_cache_t *cache, const char *root, const char *cu
             continue;
         }
 
-        if (strcmp(e->url, "/index.html") == 0) {
-            // support "/" lookup too if you want
+        if (e->size > 0) {
+            void *p = mmap(NULL, (size_t)e->size, PROT_READ,
+                           MAP_PRIVATE | MAP_POPULATE, e->fd, 0);
+            if (p == MAP_FAILED) {
+                perror("mmap cached file");
+                close(e->fd);
+                cache->count--;
+                continue;
+            }
+            e->data = p;
+        } else {
+            e->data = NULL;
         }
     }
 
@@ -166,6 +178,10 @@ void static_cache_destroy(static_file_cache_t *cache) {
     if (!cache) return;
 
     for (size_t i = 0; i < cache->count; i++) {
+        if (cache->entries[i].data) {
+            munmap((void *)cache->entries[i].data, (size_t)cache->entries[i].size);
+            cache->entries[i].data = NULL;
+        }
         if (cache->entries[i].fd >= 0) {
             close(cache->entries[i].fd);
             cache->entries[i].fd = -1;

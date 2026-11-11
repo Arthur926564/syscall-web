@@ -19,6 +19,7 @@ typedef struct {
 	off_t size;
 	const char *content_type;
 	int fd;
+	const void *data;   // mmap'd file contents, length == size
 } static_file_entry_t;
 
 

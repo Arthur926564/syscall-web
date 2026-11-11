@@ -45,10 +45,6 @@ void server_loop(int port) {
 		if (worker_start(&workers[i]) < 0) {
 			exit(1);
 		}
-		DIR *fd_dir = opendir("/proc/self/fd");
-        int count = 0;
-        while (readdir(fd_dir)) count++;
-        closedir(fd_dir);
 	}
 
 	for (int i = 0; i < NWORKERS; i++) {

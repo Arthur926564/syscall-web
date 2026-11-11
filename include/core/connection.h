@@ -26,9 +26,10 @@ typedef struct connection {
 	bool keep_alive;
 
 	int file_fd;
-    off_t file_offset; 
+    off_t file_offset;
     off_t file_size;
     bool sending_file;
+	const char *file_data;   // non-owning mmap pointer into the static cache
 
 	int inflight;
 	bool closing;

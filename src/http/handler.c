@@ -217,10 +217,6 @@ void handle_write(int epfd, connection_t *conn) {
 //
 //
 void handle_accept(worker_t *w, int client_fd, uint32_t flags) {
-	DIR *fd_dir = opendir("/proc/self/fd");
-    int count = 0;
-    while (readdir(fd_dir)) count++;
-    closedir(fd_dir);
     if (!(flags & IORING_CQE_F_MORE)) {
         io_add_accept(w);
     }
@@ -296,26 +292,8 @@ void handle_send(worker_t *w, connection_t *conn, int res) {
     conn->write_offset = 0;
 
     if (conn->sending_file) {
-        while (conn->file_offset < conn->file_size) {
-            ssize_t n = sendfile(conn->fd, conn->file_fd,
-                                 &conn->file_offset,
-                                 conn->file_size - conn->file_offset);
-
-
-            if (n > 0) continue;
-            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                io_add_send(w, conn);  // wait for socket ready
-                return;
-            }
-            if (n <= 0) { 
-				io_add_close(w, conn);
-				return; 
-			}
-        }
-        conn->file_fd      = -1;
-        conn->file_offset  = 0;
-        conn->file_size    = 0;
-        conn->sending_file = false;
+        io_add_sendfile(w, conn);
+        return;
     }
 
     if (conn->keep_alive) {
@@ -332,21 +310,16 @@ void handle_send(worker_t *w, connection_t *conn, int res) {
 
 
 
+// Called when IORING_OP_SEND of a file-body chunk completes.
 void handle_sendfile(worker_t *w, connection_t *conn, int res) {
-    if (res <= 0) {
-        io_add_close(w, conn);
-        return;
-    }
+    conn->inflight--;
+    if (conn->closing) { conn_maybe_close(w, conn); return; }
+    if (res <= 0) { io_add_close(w, conn); return; }
+
     conn->file_offset += res;
-	conn->inflight--;
-	if (conn->closing) {
-		conn_maybe_close(w, conn);
-		return;
-	}
 
     if (conn->file_offset < conn->file_size) {
-        // partial splice — continue
-        io_add_sendfile(w, conn);
+        io_add_sendfile(w, conn);  // short send — continue
         return;
     }
 

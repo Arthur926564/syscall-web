@@ -87,7 +87,6 @@ int worker_init(worker_t *w, int port) {
 	}
     w->listen_fd = tcp_listen_reuseport(port);
     if (w->listen_fd < 0) { perror("tcp_listen_reuseport"); return -1; }
-	pipe2(w->pipe_fd, O_NONBLOCK);
 
 	io_add_accept(w);
 
@@ -124,9 +123,9 @@ static void *worker_loop(void *arg) {
 				switch (op) {
 					case IO_OP_RECV:  handle_recv(w, conn, res); break;
 					case IO_OP_SEND: handle_send(w, conn,  res); break;
-					case IO_OP_SENDFILE: handle_sendfile(w, conn,  res); break;
-					case IO_OP_CLOSE: handle_close(w, conn);
-					default: 
+					case IO_OP_SENDFILE: handle_sendfile(w, conn, res); break;
+					case IO_OP_CLOSE: handle_close(w, conn); break;
+					default:
 						fprintf(stderr, "UNKNOWN OP=%d res=%d\n", op, res);
 						break;
 				}

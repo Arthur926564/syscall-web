@@ -66,33 +66,25 @@ void io_add_send(worker_t *w, connection_t *conn) {
 	io_uring_sqe_set_data(sqe, pack(conn,  IO_OP_SEND));
 }
 
+// Queues an IORING_OP_SEND of the remaining file bytes (mmap'd at startup
+// in the static cache). SPLICE is not used: on this kernel, io_uring splice
+// is per-call capped to 2 pages once the pipe-user-pages soft limit is hit,
+// which turns a 100 KiB file into ~13 async-worker dispatches. A single
+// SEND of the mmap'd buffer is one SQE, one CQE, no pipes involved.
 void io_add_sendfile(worker_t *w, connection_t *conn) {
 	if (conn->closing) return;
-	
-	struct io_uring_sqe *sqe1 = io_uring_get_sqe(&w->ring);
-	if (sqe1 == NULL) {
-		fprintf(stderr, "sqe ring full...");
-		return;
-	}
-	io_uring_prep_splice(sqe1,
-			conn->file_fd, conn->file_offset,
-			w->pipe_fd[1], -1,
-			conn->file_size - conn->file_offset,
-			SPLICE_F_MOVE);
-	io_uring_sqe_set_data(sqe1, pack(conn, IO_OP_SPLICE_IN));
 
-	struct io_uring_sqe *sqe2 = io_uring_get_sqe(&w->ring);
-	io_uring_prep_splice(sqe2,
-			w->pipe_fd[0], -1,
-			conn->fd, -1,
-			conn->file_size - conn->file_offset,
-			SPLICE_F_MOVE);
+	size_t remaining = (size_t)(conn->file_size - conn->file_offset);
+	if (remaining == 0 || conn->file_data == NULL) return;
 
+	struct io_uring_sqe *sqe = io_uring_get_sqe(&w->ring);
+	if (sqe == NULL) { io_add_close(w, conn); return; }
+
+	io_uring_prep_send(sqe, conn->fd,
+	                   conn->file_data + conn->file_offset,
+	                   remaining, 0);
+	io_uring_sqe_set_data(sqe, pack(conn, IO_OP_SENDFILE));
 	conn->inflight++;
-
-	io_uring_sqe_set_data(sqe2, pack(conn, IO_OP_SENDFILE));
-
-	sqe1->flags |= IOSQE_IO_LINK;
 }
 
 void conn_maybe_close(worker_t *w, connection_t *conn) {
