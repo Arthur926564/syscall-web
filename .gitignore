@@ -17,6 +17,8 @@ compile_flags.txt
 *.blg
 *.bcf
 *.run.xml
+*.o
+*.d
 
 # LuaLaTeX specific
 *.lua
